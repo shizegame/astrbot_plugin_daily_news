@@ -15,7 +15,7 @@ from .source_image import create_source_image
 from .news_digest import digest_text, create_digest_image
 
 
-@register("astrbot_plugin_daily_news", "anka", "内置多来源新闻、科技资讯与热榜推送", "2.2.1")
+@register("astrbot_plugin_daily_news", "anka, shizegame", "内置多来源新闻、科技资讯与热榜推送", "2.2.2")
 class DailyNewsPlugin(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
@@ -182,7 +182,7 @@ class DailyNewsPlugin(Star):
     async def check_status(self, event: AstrMessageEvent):
         seconds = self.calculate_sleep_time()
         yield event.plain_result(
-            "每日新闻插件 v2.2.1\n"
+            "每日新闻插件 v2.2.2\n"
             f"目标：{', '.join(map(str, self.target_groups))}\n"
             f"推送时间：{self.push_time}（服务器时区）\n"
             f"启用栏目：{'、'.join(SOURCES[key][0] for key in self.sources) or '无'}\n"

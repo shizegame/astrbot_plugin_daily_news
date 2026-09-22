@@ -6,18 +6,30 @@
 ![Python Version](https://img.shields.io/badge/Python-3.10%2B-blue)
 ![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
 [![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-brightgreen)](CONTRIBUTING.md)
-[![Contributors](https://img.shields.io/github/contributors/anka-afk/astrbot_plugin_daily_news?color=green)](https://github.com/anka-afk/astrbot_plugin_daily_news/graphs/contributors)
-[![Last Commit](https://img.shields.io/github/last-commit/anka-afk/astrbot_plugin_daily_news)](https://github.com/anka-afk/astrbot_plugin_daily_news/commits/main)
+[![Contributors](https://img.shields.io/github/contributors/anka-afk/astrbot_plugin_daily_news?color=green)](https://github.com/shizegame/astrbot_plugin_daily_news/graphs/contributors)
+[![Last Commit](https://img.shields.io/github/last-commit/anka-afk/astrbot_plugin_daily_news)](https://github.com/shizegame/astrbot_plugin_daily_news/commits/main)
 
 </div>
 
 <div align="center">
 
-[![Moe Counter](https://count.getloli.com/get/@DailyNewsPlugin?theme=moebooru)](https://github.com/anka-afk/astrbot_plugin_daily_news)
+[![Moe Counter](https://count.getloli.com/get/@DailyNewsPlugin?theme=moebooru)](https://github.com/shizegame/astrbot_plugin_daily_news)
 
 </div>
 
 每日 60 秒新闻推送插件 - 自动推送每日热点新闻，让你的群聊成员快速了解全球大事！
+
+## 安装与更新地址（v2.2.2）
+
+本仓库是多源汇总增强版，安装时请使用：
+
+```text
+https://github.com/shizegame/astrbot_plugin_daily_news
+```
+
+插件 `metadata.yaml` 中的 `repo` 及版本信息已与本仓库同步，后续从本 fork 安装并按其元数据更新时应使用本 fork。插件内部名称保持 `astrbot_plugin_daily_news`，未改变配置识别名称。
+
+原作者：[anka](https://github.com/anka-afk/astrbot_plugin_daily_news)；本 fork 的功能扩展与维护：shizegame。插件市场原作者条目、分类翻译、Star 数和缓存不由本仓库控制。从旧元数据安装的副本不会因 GitHub 上修改了一行而自动切换更新源；本次不修改已安装的插件或用户配置。
 
 ## v2.2.1：多栏目合并发送
 
