@@ -1,1 +1,6 @@
 __pycache__
+
+# Local verification environment
+.venv/
+__pycache__/
+*.py[cod]

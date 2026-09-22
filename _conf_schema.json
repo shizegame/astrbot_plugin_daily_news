@@ -3,7 +3,9 @@
     "description": "需要推送60s新闻的群组唯一标识符列表",
     "type": "list",
     "hint": "填写需要接收60s新闻推送的群组唯一标识符，如: 你的平台名称(自己起的):GroupMessage:1350989414, napcat:FriendMessage:123456, telegram:FriendMessage:123456",
-    "default": ["这里填你的平台名称:GroupMessage:这里填写你的群号"]
+    "default": [
+      "这里填你的平台名称:GroupMessage:这里填写你的群号"
+    ]
   },
   "push_time": {
     "description": "推送时间(以服务器时区为准)",
@@ -22,5 +24,101 @@
     "type": "bool",
     "hint": "是否使用本地图片绘制，为否则使用api获取图片",
     "default": false
+  },
+  "news_sources": {
+    "description": "内置栏目开关（定时推送及 /news all）",
+    "type": "object",
+    "hint": "无需填写链接；关闭的栏目仍可通过 /news 栏目名 单独查询。默认开启早报、IT资讯、AI快报。",
+    "items": {
+      "60s": {
+        "description": "每日60秒新闻 · 综合早报",
+        "type": "bool",
+        "default": true,
+        "hint": "公共接口可能限流或临时不可用；关闭不影响手动查询。"
+      },
+      "it": {
+        "description": "IT之家资讯 · 科技资讯",
+        "type": "bool",
+        "default": true,
+        "hint": "公共接口可能限流或临时不可用；关闭不影响手动查询。"
+      },
+      "it_rank": {
+        "description": "IT之家日榜 · 科技榜单",
+        "type": "bool",
+        "default": false,
+        "hint": "公共接口可能限流或临时不可用；关闭不影响手动查询。"
+      },
+      "ai": {
+        "description": "AI资讯快报 · AI资讯",
+        "type": "bool",
+        "default": true,
+        "hint": "公共接口可能限流或临时不可用；关闭不影响手动查询。"
+      },
+      "hn": {
+        "description": "Hacker News · 开发者资讯",
+        "type": "bool",
+        "default": false,
+        "hint": "公共接口可能限流或临时不可用；关闭不影响手动查询。"
+      },
+      "weibo": {
+        "description": "微博热搜 · 热榜",
+        "type": "bool",
+        "default": false,
+        "hint": "公共接口可能限流或临时不可用；关闭不影响手动查询。"
+      },
+      "zhihu": {
+        "description": "知乎热榜 · 热榜",
+        "type": "bool",
+        "default": false,
+        "hint": "公共接口可能限流或临时不可用；关闭不影响手动查询。"
+      },
+      "baidu": {
+        "description": "百度热搜 · 热榜",
+        "type": "bool",
+        "default": false,
+        "hint": "公共接口可能限流或临时不可用；关闭不影响手动查询。"
+      },
+      "toutiao": {
+        "description": "今日头条热榜 · 热榜",
+        "type": "bool",
+        "default": false,
+        "hint": "公共接口可能限流或临时不可用；关闭不影响手动查询。"
+      },
+      "douyin": {
+        "description": "抖音热榜 · 热榜",
+        "type": "bool",
+        "default": false,
+        "hint": "公共接口可能限流或临时不可用；关闭不影响手动查询。"
+      },
+      "bili": {
+        "description": "B站热搜 · 热榜",
+        "type": "bool",
+        "default": false,
+        "hint": "公共接口可能限流或临时不可用；关闭不影响手动查询。"
+      },
+      "tieba": {
+        "description": "贴吧热议 · 热榜",
+        "type": "bool",
+        "default": false,
+        "hint": "公共接口可能限流或临时不可用；关闭不影响手动查询。"
+      }
+    }
+  },
+  "items_per_source": {
+    "description": "新增栏目每次展示条数",
+    "type": "int",
+    "default": 5,
+    "hint": "范围 1–10，超出范围会限制；60 秒早报保留完整条目。"
+  },
+  "cache_seconds": {
+    "description": "各栏目缓存时长（秒）",
+    "type": "int",
+    "default": 600,
+    "hint": "范围 60–3600。复用缓存减少公共 API 请求，不提供强制刷新绕过。"
+  },
+  "include_source_links": {
+    "description": "文字消息附带原文链接",
+    "type": "bool",
+    "default": true
   }
 }
