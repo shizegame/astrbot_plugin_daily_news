@@ -1,6 +1,6 @@
 name: astrbot_plugin_daily_news
 desc: anka - 内置12个新闻与热榜栏目，无需配置订阅链接；请设置推送目标和时间
 help: anka - 内置12个新闻与热榜栏目，无需配置订阅链接；请设置推送目标和时间
-version: v2.2.0
+version: v2.2.1
 author: anka
 repo: https://github.com/anka-afk/astrbot_plugin_daily_news

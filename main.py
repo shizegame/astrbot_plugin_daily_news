@@ -12,9 +12,10 @@ from astrbot.api.message_components import Plain, Image
 from .news_image_generator import create_news_image_from_data
 from .news_sources import NewsClient, SOURCES, selected_sources, resolve_source, text_pages
 from .source_image import create_source_image
+from .news_digest import digest_text, create_digest_image
 
 
-@register("astrbot_plugin_daily_news", "anka", "内置多来源新闻、科技资讯与热榜推送", "2.2.0")
+@register("astrbot_plugin_daily_news", "anka", "内置多来源新闻、科技资讯与热榜推送", "2.2.1")
 class DailyNewsPlugin(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
@@ -71,34 +72,48 @@ class DailyNewsPlugin(Star):
         result.chain = [component]
         return result
 
+    async def _digest_image(self, columns, failed):
+        # Preserve the original single-source 60s poster option. A multi-source
+        # request always renders one locally composed image, including failures.
+        if len(columns) == 1 and not failed and columns[0]["source_id"] == "60s":
+            return await self._image(columns[0])
+        return await asyncio.to_thread(create_digest_image, columns, failed)
+
     async def _prepare(self, sources, mode):
         if mode not in ("image", "text", "all"):
             raise ValueError("模式应为 image、text 或 all")
         if not sources:
             raise ValueError("未启用任何定时栏目，请在插件配置中开启")
-        messages, failed = [], []
+        columns, failed = [], []
         results = await self.client.bundle(sources)
         for source, data in results:
             if isinstance(data, Exception):
                 failed.append(SOURCES[source][0])
                 logger.warning(f"[每日新闻] {SOURCES[source][0]} 暂不可用")
-                continue
-            image_ok = False
-            if mode != "text":
-                try:
-                    image = await self._image(data)
-                    if not image:
-                        raise ValueError("没有生成图片")
-                    messages.append(self._chain(Image.fromBase64(image)))
-                    image_ok = True
-                except Exception:
-                    logger.warning(f"[每日新闻] {SOURCES[source][0]} 图片失败，降级文字")
-            if mode != "image" or not image_ok:
-                for page in text_pages(data, self.include_links):
-                    messages.append(self._chain(Plain(page)))
-        if failed:
-            messages.append(self._chain(Plain("以下栏目暂不可用，已跳过：" + "、".join(failed))))
-        return messages, failed, len(sources) - len(failed)
+            else:
+                columns.append(data)
+        components = []
+        image_ok = False
+        image_failed = False
+        if mode != "text" and columns:
+            try:
+                image = await self._digest_image(columns, failed)
+                if not image:
+                    raise ValueError("没有生成汇总图片")
+                components.append(Image.fromBase64(image))
+                image_ok = True
+            except Exception:
+                image_failed = True
+                logger.warning("[每日新闻] 汇总图片生成失败，降级为一条文字消息")
+        if mode != "image" or not image_ok:
+            text = digest_text(columns, failed, self.include_links, max_chars=3400)
+            if image_failed:
+                text = "汇总图片生成失败，已改为文字。\n" + text
+            components.append(Plain(text))
+        message = MessageChain()
+        message.chain = components
+        # One platform send per recipient, also in image + text mode.
+        return [message], failed, len(columns)
 
     async def _dispatch(self, targets, messages):
         delivered, failed = 0, 0
@@ -167,7 +182,7 @@ class DailyNewsPlugin(Star):
     async def check_status(self, event: AstrMessageEvent):
         seconds = self.calculate_sleep_time()
         yield event.plain_result(
-            "每日新闻插件 v2.2.0\n"
+            "每日新闻插件 v2.2.1\n"
             f"目标：{', '.join(map(str, self.target_groups))}\n"
             f"推送时间：{self.push_time}（服务器时区）\n"
             f"启用栏目：{'、'.join(SOURCES[key][0] for key in self.sources) or '无'}\n"

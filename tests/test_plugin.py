@@ -62,6 +62,7 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         self.plugin._message_interval = 0
         self.plugin.client.requester = request
         self.plugin._image = AsyncMock(return_value='encoded-image')
+        self.plugin._digest_image = AsyncMock(return_value='merged-image')
 
     async def asyncTearDown(self):
         await self.plugin.terminate()
@@ -74,7 +75,7 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(isinstance(msg.chain[0], Plain) for msg in messages))
 
     async def test_image_failure_falls_back_to_text(self):
-        self.plugin._image.side_effect = RuntimeError('font unavailable')
+        self.plugin._digest_image.side_effect = RuntimeError('font unavailable')
         messages, errors, count = await self.plugin._prepare(['it'], 'image')
         self.assertIsInstance(messages[0].chain[0], Plain)
         self.assertEqual(count, 1)
@@ -128,3 +129,44 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         self.plugin.context.send_message = AsyncMock(return_value=False)
         sent, errors, _, _ = await self.plugin.send_daily_news('text', ['it'])
         self.assertEqual((sent, errors), (0, 1))
+
+    async def test_all_columns_text_are_one_message(self):
+        messages, _, count = await self.plugin._prepare(['60s', 'it', 'ai'], 'text')
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(len(messages[0].chain), 1)
+        text = messages[0].chain[0].text
+        for name in ['每日60秒', 'IT之家', 'AI资讯']:
+            self.assertIn(name, text)
+        self.assertLessEqual(len(text), 3500)
+        self.plugin._digest_image.assert_not_awaited()
+        self.assertEqual(count, 3)
+
+    async def test_all_columns_image_are_one_image(self):
+        messages, _, count = await self.plugin._prepare(['60s', 'it', 'ai'], 'image')
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0].chain, [('image', 'merged-image')])
+        self.plugin._digest_image.assert_awaited_once()
+        self.assertEqual(len(self.plugin._digest_image.call_args.args[0]), 3)
+
+    async def test_image_and_text_use_one_platform_send_per_target(self):
+        sent, errors, _, count = await self.plugin.send_daily_news('all', ['60s', 'it', 'ai'])
+        self.assertEqual((sent, errors, count), (1, 0, 3))
+        self.assertEqual(len(self.sent), 1)
+        components = self.sent[0][1].chain
+        self.assertEqual(len(components), 2)
+        self.assertEqual(components[0], ('image', 'merged-image'))
+        self.assertIsInstance(components[1], Plain)
+
+    async def test_missing_source_is_in_image_footer_not_extra_message(self):
+        messages, failed, count = await self.plugin._prepare(['it', 'bili'], 'image')
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(len(messages[0].chain), 1)
+        self.assertEqual(self.plugin._digest_image.call_args.args[1], ['B站热搜'])
+
+    async def test_total_source_failure_sends_one_notice_without_image(self):
+        messages, failed, count = await self.plugin._prepare(['bili'], 'all')
+        self.assertEqual(count, 0)
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(len(messages[0].chain), 1)
+        self.assertIn('没有获取到可用内容', messages[0].chain[0].text)
+        self.plugin._digest_image.assert_not_awaited()
