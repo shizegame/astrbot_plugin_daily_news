@@ -263,3 +263,23 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         document = self.plugin.text_to_image.call_args.args[0]
         for name, *_ in source_module.SOURCES.values():
             self.assertIn(name, document)
+
+    async def test_ai_output_is_the_input_to_renderer_and_text(self):
+        import json
+        del self.plugin._digest_image
+        self.plugin.ai.provider_id = 'test-provider'
+        self.plugin.context.llm_generate = AsyncMock(return_value=types.SimpleNamespace(completion_text=json.dumps({'sections':[{'source_id':'it','items':[{'index':1,'summary':'模型整理的重点'}]}]},ensure_ascii=False)))
+        self.plugin.text_to_image = AsyncMock(return_value='https://images.example.com/ai.png')
+        messages, _, _ = await self.plugin._prepare(['it'], 'all', 'session')
+        self.assertIn('模型整理的重点', self.plugin.text_to_image.call_args.args[0])
+        self.assertIn('模型整理的重点', messages[0].chain[1].text)
+        self.assertEqual(len(messages), 1)
+        self.plugin.context.llm_generate.assert_awaited_once()
+
+    async def test_news_raw_bypasses_ai(self):
+        self.plugin.ai.summarize = AsyncMock(side_effect=AssertionError('must bypass AI'))
+        event = types.SimpleNamespace(unified_msg_origin='current', plain_result=lambda value:value, stop_event=lambda:None)
+        replies = [msg async for msg in self.plugin.news_raw(event, 'it')]
+        self.assertFalse(replies)
+        self.plugin.ai.summarize.assert_not_awaited()
+        self.assertIn('新闻', self.sent[0][1].chain[0].text)

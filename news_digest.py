@@ -10,13 +10,16 @@ def clipped(text, limit):
 
 
 def digest_text(columns, unavailable=(), include_links=True, max_chars=3500):
-    header = "【新闻与热榜汇总】"
-    notes = ["来源：各栏目所示平台 / 60s API 聚合服务。"]
+    is_ai = any(data.get("ai_summary") for data in columns)
+    header = "【AI新闻简报】" if is_ai else "【新闻与热榜汇总】"
+    notes = ["来源：各栏目所示平台或聚合服务。"]
+    if is_ai:
+        notes.append("AI基于标题/已有摘要整理，未核实全文；原始素材：/news_raw。")
     if any(data["category"] == "热榜" for data in columns):
         notes.append("热榜仅反映讨论热度，不代表内容已经核实。")
     for data in columns:
         if data.get("tip"):
-            notes.append("今日提示：" + clipped(data["tip"], 160))
+            notes.append("提示：" + clipped(data["tip"], 160))
     if unavailable:
         notes.append("暂不可用，已跳过：" + "、".join(unavailable))
     notes.append("单条汇总可能省略较长标题、部分条目或链接；单独查询：/news 栏目代号 text")
@@ -28,9 +31,10 @@ def digest_text(columns, unavailable=(), include_links=True, max_chars=3500):
     sections = []
     for data in columns:
         heading = f"【{data['source_name']} · {data['category']}】\n"
+        heading += "来源：" + data["provider"] + "\n"
         heading += ("数据日期：" + data["source_date"] if data["source_date"] else "获取时间：" + data["fetched_at"])
         items = data["items"]
-        guide = "\n完整栏目：/news " + data["source_id"] + " text"
+        guide = "\n原始栏目：/news_raw " + data["source_id"] + " text"
         body_budget = quota - len(heading) - len(guide) - 25
         shown = max(1, min(len(items), body_budget // 32))
         per_item = max(8, body_budget // shown)
@@ -68,16 +72,18 @@ def digest_image_text(columns, unavailable=()):
     """Readable whole-document input for AstrBot text_to_image, not a bitmap."""
     if not columns:
         raise ValueError("没有可绘制的栏目")
-    parts = ["# 新闻与热榜汇总", f"共 {len(columns)} 个栏目 · 各栏目数据日期独立标注"]
+    parts = ["# AI新闻简报" if any(c.get("ai_summary") for c in columns) else "# 新闻与热榜汇总", f"共 {len(columns)} 个栏目 · 各栏目数据日期独立标注"]
     for data in columns:
         parts.append("## " + markdown_literal(data["source_name"]))
         stamp = "数据日期：" + data["source_date"] if data["source_date"] else "获取时间：" + data["fetched_at"]
-        parts.append(markdown_literal(stamp) + " · " + markdown_literal(data["category"]))
+        parts.append(markdown_literal(stamp) + " · " + markdown_literal(data["category"]) + " · " + markdown_literal(data["provider"]))
         for index, item in enumerate(data["items"], 1):
             parts.append(f"{index}. " + markdown_literal(clipped(item["title"], 180)))
         if data.get("tip"):
             parts.append("提示：" + markdown_literal(clipped(data["tip"], 160)))
     if unavailable:
         parts += ["## 暂不可用", markdown_literal("、".join(unavailable))]
-    parts += ["---", "来源：各栏目所示平台 / 60s API 聚合服务。", "热榜仅反映讨论热度，不代表内容已经核实。较长标题已省略；原文链接可使用文字模式查询。"]
+    parts += ["---", "来源：各栏目所示平台或聚合服务。", "热榜仅反映讨论热度，不代表内容已经核实。较长标题已省略；原文链接可使用文字模式查询。"]
+    if any(c.get("ai_summary") for c in columns):
+        parts.append("AI基于标题/已有摘要整理，未核实全文；原始素材请用 /news_raw 查询。")
     return "\n\n".join(parts)

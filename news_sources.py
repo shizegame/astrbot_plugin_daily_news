@@ -6,7 +6,9 @@ import html
 import json
 import re
 import time
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, quote
+from email.utils import parsedate_to_datetime
+import xml.etree.ElementTree as ET
 
 import aiohttp
 
@@ -15,7 +17,6 @@ import aiohttp
 API_BASES = (
     "https://60s.b23.run/v2",
     "https://60s.viki.moe/v2",
-    "https://60s-api-cf.viki.moe/v2",
 )
 # id: display name, endpoint, category, aliases
 SOURCES = {
@@ -95,7 +96,11 @@ def normalize(source, payload, limit=5):
         if not title or identity in seen:
             continue
         seen.add(identity)
-        items.append({"title": title, "url": link, "publisher": origin})
+        item = {"title": title, "url": link, "publisher": origin}
+        if isinstance(row, dict):
+            item["summary"] = clean(row.get("detail") or row.get("summary") or row.get("description"), 350)
+            item["published_at"] = clean(row.get("published_at") or row.get("date"), 64)
+        items.append(item)
         if len(items) >= count:
             break
     if not items:
@@ -156,7 +161,7 @@ class NewsClient:
             return await self.requester(url)
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=6))
-        async with self._session.get(url, headers={"User-Agent": "AstrBot-Daily-News/2.2"}) as response:
+        async with self._session.get(url, headers={"User-Agent": "Mozilla/5.0 (compatible; AstrBot-Daily-News/2.3)"}) as response:
             response.raise_for_status()
             chunks, size = [], 0
             async for chunk in response.content.iter_chunked(65536):
@@ -164,7 +169,8 @@ class NewsClient:
                 if size > 2 * 1024 * 1024:
                     raise ValueError("上游响应过大")
                 chunks.append(chunk)
-            return json.loads(b"".join(chunks))
+            body = b"".join(chunks)
+            return body if url == AI_FEED else json.loads(body)
 
     async def get(self, source):
         source = resolve_source(source)
@@ -177,7 +183,7 @@ class NewsClient:
                 raise ValueError("该栏目暂不可用，请稍后重试")
             try:
                 async with self._semaphore:
-                    data = await asyncio.wait_for(self._fetch(source), timeout=18)
+                    data = await asyncio.wait_for(self._fetch(source), timeout=28)
             except Exception:
                 self._failures[source] = time.monotonic() + 60
                 raise ValueError("该栏目所有内置接口均暂不可用") from None
@@ -186,11 +192,21 @@ class NewsClient:
             return copy.deepcopy(data)
 
     async def _fetch(self, source):
-        for base in self.bases:
+        endpoints = [(base + "/" + SOURCES[source][1], "aggregate") for base in self.bases]
+        # Try independent upstreams before spending the entire deadline on mirrors.
+        if source in DIRECT_URLS:
+            endpoints.insert(0, (DIRECT_URLS[source], "direct"))
+        if source == "ai":
+            endpoints.insert(min(1, len(endpoints)), (AI_FEED, "rss"))
+        for url, kind in endpoints:
             try:
-                payload = await self._request(base + "/" + SOURCES[source][1])
+                payload = await self._request(url)
+                if kind == "direct":
+                    return normalize_direct(source, payload, self.limit)
+                if kind == "rss":
+                    return normalize_ai_feed(payload, self.limit)
                 return normalize(source, payload, self.limit)
-            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError):
+            except (aiohttp.ClientError, asyncio.TimeoutError, ValueError, TypeError, KeyError, ET.ParseError):
                 continue
         raise ValueError("没有可用响应")
 
@@ -201,3 +217,77 @@ class NewsClient:
     async def close(self):
         if self._session is not None and not self._session.closed:
             await self._session.close()
+
+
+DIRECT_URLS = {
+    "zhihu": "https://api.zhihu.com/topstory/hot-lists/total?limit=20",
+    "bili": "https://api.bilibili.com/x/web-interface/wbi/search/square?limit=20",
+}
+AI_FEED = "https://www.qbitai.com/feed"
+
+
+def normalize_direct(source, payload, limit=5):
+    if not isinstance(payload, dict):
+        raise ValueError("无效直接接口响应")
+    rows = []
+    if source == "zhihu":
+        if not isinstance(payload.get("data"), list):
+            raise ValueError("知乎热榜格式不匹配")
+        for entry in payload["data"][:100]:
+            target = entry.get("target", {}) if isinstance(entry, dict) else {}
+            if not isinstance(target, dict):
+                continue
+            ident = str(target.get("id", ""))
+            if ident.isdigit():
+                rows.append({"title": target.get("title"), "summary": target.get("excerpt"),
+                             "url": "https://www.zhihu.com/question/" + ident})
+    elif source == "bili":
+        if payload.get("code") != 0:
+            raise ValueError("B站热搜接口错误")
+        data = payload.get("data")
+        trend = data.get("trending") if isinstance(data, dict) else None
+        entries = trend.get("list") if isinstance(trend, dict) else None
+        if not isinstance(entries, list):
+            raise ValueError("B站热搜格式不匹配")
+        for entry in entries[:100]:
+            if not isinstance(entry, dict):
+                continue
+            word = clean(entry.get("keyword") or entry.get("show_name"))
+            rows.append({"title": word, "url": "https://search.bilibili.com/all?keyword=" + quote(word)})
+    else:
+        raise ValueError("无此直接接口")
+    data = normalize(source, {"data": rows}, limit)
+    data["provider"] = "知乎公开热榜接口" if source == "zhihu" else "B站公开搜索热榜接口"
+    return data
+
+
+def normalize_ai_feed(body, limit=5, now=None):
+    if not isinstance(body, (bytes, str)) or len(body) > 2 * 1024 * 1024:
+        raise ValueError("无效 RSS")
+    upper = body.upper() if isinstance(body, bytes) else body.upper().encode()
+    if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:
+        raise ValueError("拒绝 RSS 外部实体")
+    root = ET.fromstring(body)
+    now = now or dt.datetime.now(dt.timezone.utc)
+    rows = []
+    for item in root.findall('./channel/item')[:100]:
+        try:
+            date = parsedate_to_datetime(item.findtext('pubDate', ''))
+            if date.tzinfo is None:
+                date = date.replace(tzinfo=dt.timezone.utc)
+            age = (now - date).total_seconds()
+            if age < -3600 or age > 7 * 86400:
+                continue
+        except (ValueError, TypeError, OverflowError):
+            continue
+        rows.append({'title': item.findtext('title', ''), 'url': item.findtext('link', ''),
+                     'summary': item.findtext('description', ''), 'source': '量子位',
+                     'published_at': date.astimezone(dt.timezone.utc).isoformat()})
+    rows.sort(key=lambda x: x['published_at'], reverse=True)
+    data = normalize('ai', {'data': rows}, limit)
+    data['provider'] = '量子位 RSS（AI资讯备用源）'
+    dates = [i['published_at'][:10] for i in data['items']]
+    data['source_date'] = min(dates) if min(dates) == max(dates) else min(dates) + ' 至 ' + max(dates)
+    data['date'] = max(dates)
+    data['tip'] = '原 AI 快报暂无有效数据，使用量子位近7天资讯；非原快报内容，日期按 RSS 发布时间（UTC）。'
+    return data

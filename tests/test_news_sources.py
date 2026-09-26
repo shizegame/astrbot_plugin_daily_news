@@ -107,7 +107,7 @@ class ClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsInstance(result[1][1], Exception)
         with self.assertRaises(ValueError):
             await client.get('bili')
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 3)
         await client.close()
 
     async def test_parallelism_is_bounded(self):

@@ -131,5 +131,29 @@
     "type": "int",
     "default": 60,
     "hint": "范围10–120。使用 AstrBot 文转图服务，不再用插件内置 Pillow 绘图；失败时明确提示并降级文字。"
+  },
+  "ai_summary_enabled": {
+    "description": "使用 AI 总结简报",
+    "type": "bool",
+    "default": true,
+    "hint": "使用 AstrBot 配置的模型，可能产生模型费用；失败回退原始汇总。/news_raw 可绕过。"
+  },
+  "ai_provider_id": {
+    "description": "AI总结模型提供商ID",
+    "type": "string",
+    "default": "",
+    "hint": "留空：手动查询使用当前会话模型，定时推送使用默认模型。指定ID后不自动换模型。"
+  },
+  "ai_summary_timeout": {
+    "description": "AI总结超时（秒）",
+    "type": "int",
+    "default": 60,
+    "hint": "10–180秒；相同素材/会话摘要缓存10分钟。"
+  },
+  "ai_summary_prompt": {
+    "description": "AI摘要编辑偏好",
+    "type": "text",
+    "default": "简洁、客观，突出新闻要点，不添加主观评价。",
+    "hint": "自定义语气和关注点；必须遵循结构化输出、逐条来源索引和保留栏目规则。"
   }
 }

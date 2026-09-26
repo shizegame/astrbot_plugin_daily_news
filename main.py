@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import datetime
 from contextlib import suppress
 
@@ -10,13 +11,15 @@ from astrbot.api.message_components import Plain, Image
 from .news_sources import NewsClient, SOURCES, selected_sources, resolve_source, text_pages
 from .news_digest import digest_text, digest_image_text
 from .image_output import image_location
+from .ai_digest import AISummarizer
 
 
-@register("astrbot_plugin_daily_news", "anka, shizegame", "内置多来源新闻、科技资讯与热榜推送", "2.2.3")
+@register("astrbot_plugin_daily_news", "anka, shizegame", "内置多来源新闻、科技资讯与热榜推送", "2.3.0")
 class DailyNewsPlugin(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
         self.config = config
+        self.ai = AISummarizer(context, config)
         self.target_groups = config.get("target_groups", [])
         self.push_time = config.get("push_time", "08:00")
         # Fail clearly on invalid configuration instead of repeatedly retrying.
@@ -74,7 +77,7 @@ class DailyNewsPlugin(Star):
     async def _digest_image(self, columns, failed):
         return await self._render_image(digest_image_text(columns, failed))
 
-    async def _prepare(self, sources, mode):
+    async def _prepare(self, sources, mode, umo=None, use_ai=True):
         if mode not in ("image", "text", "all"):
             raise ValueError("模式应为 image、text 或 all")
         if not sources:
@@ -87,6 +90,12 @@ class DailyNewsPlugin(Star):
                 logger.warning(f"[每日新闻] {SOURCES[source][0]} 暂不可用")
             else:
                 columns.append(data)
+        if use_ai:
+            columns, ai_notice = await self.ai.summarize(columns, umo)
+            if ai_notice and columns:
+                logger.warning("[每日新闻] " + self.ai.status)
+                columns = copy.deepcopy(columns)
+                columns[0]["tip"] = ai_notice + columns[0].get("tip", "")
         components = []
         image_ok = False
         image_failed = False
@@ -179,19 +188,20 @@ class DailyNewsPlugin(Star):
     async def check_status(self, event: AstrMessageEvent):
         seconds = self.calculate_sleep_time()
         yield event.plain_result(
-            "每日新闻插件 v2.2.3\n"
+            "每日新闻插件 v2.3.0\n"
             f"目标：{', '.join(map(str, self.target_groups))}\n"
             f"推送时间：{self.push_time}（服务器时区）\n"
             f"启用栏目：{'、'.join(SOURCES[key][0] for key in self.sources) or '无'}\n"
             f"每个新增栏目最多 {self.client.limit} 条；缓存 {self.client.ttl} 秒\n"
+            f"AI总结：{self.ai.status}；模型：{self.ai.provider_id or 'AstrBot 当前/默认模型'}\n"
             f"默认查询模式：{self.default_news_mode}；转图：AstrBot text_to_image\n"
             f"最近图片生成：{self._last_image_status}\n"
             f"最近消息发送：{self._last_send_status}\n"
             f"距离下次推送：{int(seconds // 3600)} 小时 {int(seconds % 3600 // 60)} 分钟"
         )
 
-    async def _send_current(self, event, sources, mode):
-        messages, unavailable, count = await self._prepare(sources, mode)
+    async def _send_current(self, event, sources, mode, use_ai=True):
+        messages, unavailable, count = await self._prepare(sources, mode, event.unified_msg_origin, use_ai)
         sent, errors = await self._dispatch([event.unified_msg_origin], messages)
         if errors or not sent:
             raise ValueError("消息发送失败；若图片已生成，请检查平台图片上传及插件日志，可能部分消息已送达")
@@ -203,6 +213,16 @@ class DailyNewsPlugin(Star):
             await self._send_current(event, self._sources_for(source, self.sources), mode or self.default_news_mode)
         except Exception as exc:
             yield event.plain_result(f"获取新闻失败：{exc}")
+        finally:
+            event.stop_event()
+
+    @filter.command("news_raw")
+    async def news_raw(self, event: AstrMessageEvent, source: str = "all", mode: str = "text"):
+        """绕过AI，查看原始新闻素材，例如 /news_raw ai。"""
+        try:
+            await self._send_current(event, self._sources_for(source, self.sources), mode, use_ai=False)
+        except Exception as exc:
+            yield event.plain_result(f"获取原始新闻失败：{exc}")
         finally:
             event.stop_event()
 
