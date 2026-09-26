@@ -10,10 +10,16 @@ from news_sources import SOURCES, NewsClient, normalize, resolve_source, selecte
 
 class SourceTests(unittest.TestCase):
     def test_catalog_and_aliases(self):
-        self.assertEqual(len(SOURCES), 12)
+        self.assertEqual(len(SOURCES), 21)
         self.assertEqual(resolve_source('微博'), 'weibo')
         self.assertEqual(resolve_source('B站'), 'bili')
         self.assertEqual(resolve_source('AI'), 'ai')
+        self.assertEqual(resolve_source('BBC'), 'bbc')
+        self.assertEqual(resolve_source('卫报'), 'guardian')
+        self.assertEqual(resolve_source('联合国'), 'un')
+        self.assertEqual(resolve_source('英国政府'), 'govuk')
+        self.assertEqual(resolve_source('STAT'), 'statnews')
+        self.assertEqual(resolve_source('纽约时报'), 'nyt')
         self.assertEqual(selected_sources({}), ['60s', 'it', 'ai'])
         self.assertEqual(selected_sources(dict.fromkeys(SOURCES, False)), [])
         with self.assertRaises(ValueError):

@@ -22,7 +22,7 @@
   "news_sources": {
     "description": "内置栏目开关（定时推送及 /news all）",
     "type": "object",
-    "hint": "无需填写链接；关闭的栏目仍可通过 /news 栏目名 单独查询。默认开启早报、IT资讯、AI快报。",
+    "hint": "无需填写链接；关闭的栏目仍可通过 /news 栏目名 单独查询。默认开启早报、IT资讯、AI快报。海外栏目（BBC/卫报/纽约时报/半岛/德国之声/联合国/英国政府/STAT/Nature）默认关闭，需要国际出口，必要时配置 news_fetch_proxy。",
     "items": {
       "60s": {
         "description": "每日60秒新闻 · 综合早报",
@@ -95,6 +95,60 @@
         "type": "bool",
         "default": false,
         "hint": "公共接口可能限流或临时不可用；关闭不影响手动查询。"
+      },
+      "bbc": {
+        "description": "BBC国际新闻 · 国际新闻",
+        "type": "bool",
+        "default": false,
+        "hint": "官方 World RSS；需要国际出口，必要时配置 news_fetch_proxy。默认关闭；关闭时仍可用 /news bbc 单独查询。"
+      },
+      "guardian": {
+        "description": "卫报国际新闻 · 国际新闻",
+        "type": "bool",
+        "default": false,
+        "hint": "官方 World RSS；需要国际出口。默认关闭；关闭时仍可用 /news guardian 单独查询。"
+      },
+      "nyt": {
+        "description": "纽约时报国际新闻 · 国际新闻",
+        "type": "bool",
+        "default": false,
+        "hint": "官方 World RSS；需要国际出口。默认关闭；关闭时仍可用 /news nyt 单独查询。"
+      },
+      "aljazeera": {
+        "description": "半岛电视台新闻 · 国际新闻",
+        "type": "bool",
+        "default": false,
+        "hint": "官方全站 RSS（英文）；需要国际出口。默认关闭；关闭时仍可用 /news aljazeera 单独查询。"
+      },
+      "dw": {
+        "description": "德国之声新闻 · 国际新闻",
+        "type": "bool",
+        "default": false,
+        "hint": "官方英文 RDF feed；需要国际出口。默认关闭；关闭时仍可用 /news dw 单独查询。"
+      },
+      "un": {
+        "description": "联合国新闻 · 国际新闻",
+        "type": "bool",
+        "default": false,
+        "hint": "UN News 官方英文 RSS；需要国际出口，必要时配置 news_fetch_proxy。默认关闭。"
+      },
+      "govuk": {
+        "description": "英国政府新闻 · 政策前沿",
+        "type": "bool",
+        "default": false,
+        "hint": "GOV.UK 官方新闻与政策 Atom feed（英文）；需要国际出口。默认关闭。"
+      },
+      "statnews": {
+        "description": "STAT医学新闻 · 医药前沿",
+        "type": "bool",
+        "default": false,
+        "hint": "STAT News 官方 RSS（英文，医学/公卫/生物医药）；需要国际出口。默认关闭。"
+      },
+      "nature": {
+        "description": "自然杂志快讯 · 医药前沿",
+        "type": "bool",
+        "default": false,
+        "hint": "Nature 最新研究 RSS（英文）；需要国际出口。默认关闭；关闭时仍可用 /news nature 单独查询。"
       }
     }
   },
@@ -260,5 +314,23 @@
     "description": "语言标识方式",
     "default": "title",
     "hint": "可选值：title（各语言用本地化大标题，推荐）、bracket（额外加【语言】前缀行）、none（不加标识）。填写其他值时按 title 处理。"
+  },
+  "news_fetch_proxy": {
+    "type": "string",
+    "description": "抓取新闻/天气使用的HTTP代理",
+    "default": "",
+    "hint": "仅支持 http:// 或 https:// 形式，例如 http://127.0.0.1:7890。海外栏目（BBC等）在无国际出口的服务器上需要它；留空表示直连。不支持 socks（aiohttp 需额外依赖）。填错会在启动时报错，不会静默忽略。"
+  },
+  "image_show_links": {
+    "type": "bool",
+    "description": "图片中显示原文链接",
+    "default": false,
+    "hint": "默认关闭：渲染图片前会去掉 Markdown 链接和裸URL，只保留标题文字（图片里链接不可点且占版面）。文字消息是否带链接由 include_source_links 控制。"
+  },
+  "news_fetch_timeout": {
+    "type": "int",
+    "description": "单个上游请求超时（秒）",
+    "default": 10,
+    "hint": "3–30秒。海外feed在部分网络下较慢（实测可达4秒），太小会误判不可用；不可达的主机会按此值等待后跳过。每个栏目的整体截止时间为“请求超时×端点数”，上限120秒。"
   }
 }

@@ -6,6 +6,10 @@ import json
 import re
 import time
 import aiohttp
+if __package__:
+    from .news_sources import normalize_proxy
+else:
+    from news_sources import normalize_proxy
 
 WMO = {0:'晴',1:'大部晴朗',2:'局部多云',3:'阴',45:'雾',48:'雾凇',51:'小毛毛雨',53:'毛毛雨',55:'强毛毛雨',56:'冻毛毛雨',57:'冻毛毛雨',61:'小雨',63:'中雨',65:'大雨',66:'冻雨',67:'冻雨',71:'小雪',73:'中雪',75:'大雪',77:'米雪',80:'小阵雨',81:'阵雨',82:'强阵雨',85:'阵雪',86:'强阵雪',95:'雷暴',96:'雷暴伴冰雹',99:'强雷暴伴冰雹'}
 
@@ -18,6 +22,8 @@ class WeatherClient:
         self.timezone = str(config.get('weather_timezone', 'auto') or 'auto')
         self.ttl = max(5, min(180, int(config.get('weather_cache_minutes', 30)))) * 60
         self.interval = max(0, min(10, float(config.get('weather_interval_seconds', 3))))
+        # Same egress option as the news client; Open-Meteo is overseas too.
+        self.proxy = normalize_proxy(config.get('news_fetch_proxy', ''))
         self.status = '尚未获取' if self.enabled else '已关闭'
         self._session = None
         self._lock = asyncio.Lock()
@@ -31,7 +37,7 @@ class WeatherClient:
         self._last_call = time.monotonic()
         if self._session is None or self._session.closed:
             self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=6))
-        async with self._session.get(url, params=params) as resp:
+        async with self._session.get(url, params=params, proxy=self.proxy or None) as resp:
             resp.raise_for_status()
             chunks, size = [], 0
             async for chunk in resp.content.iter_chunked(65536):

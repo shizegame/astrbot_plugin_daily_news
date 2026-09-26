@@ -1,6 +1,7 @@
 """One digest, one image / message. No new fetches or platform sends here."""
 import datetime
 import html
+import re
 
 
 def clipped(text, limit):
@@ -112,3 +113,23 @@ def digest_markdown(columns, unavailable=(), include_links=False, ai_unavailable
 def digest_image_text(columns, unavailable=()):
     """Readable whole-document input for AstrBot text_to_image, not a bitmap."""
     return digest_markdown(columns, unavailable)
+
+
+MARKDOWN_LINK = re.compile(r'\[([^\]]*)\]\(([^)]*)\)')
+PAREN_URL = re.compile(r'[（(]\s*https?://[^）)\s]+\s*[）)]')
+BARE_URL_LINE = re.compile(r'(?m)^[ \t]*(?:\d+\.[ \t]*)?https?://\S+[ \t]*$')
+BARE_URL = re.compile(r'[ \t]*https?://\S+')
+
+
+def strip_links(text):
+    """Remove link targets but keep their label text, for image rendering.
+
+    Applied to whatever the model or the fallback produced, including translated
+    editions, so an image never spends lines on URLs that cannot be clicked.
+    """
+    text = MARKDOWN_LINK.sub(lambda m: m.group(1), str(text))
+    text = PAREN_URL.sub('', text)
+    text = BARE_URL_LINE.sub('', text)
+    text = BARE_URL.sub('', text)
+    text = re.sub(r'(?m)^[ \t]+$', '', text)
+    return re.sub(r'\n{3,}', '\n\n', text).strip()

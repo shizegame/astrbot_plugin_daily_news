@@ -407,3 +407,46 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(plugin.label_style,'title')
         finally:
             await plugin.terminate()
+
+    async def test_images_have_no_links_by_default_but_text_keeps_them(self):
+        del self.plugin._digest_image
+        self.plugin.ai.summarize=AsyncMock(return_value=('## 科技\n- [某公司发布新芯片](https://example.com/a)\n- 裸链接 https://example.com/b',''))
+        self.plugin.ai.translate_edition=AsyncMock(return_value='# Daily Digest\n\n## Tech\n- [New chip](https://example.com/a)')
+        self.plugin.languages=['zh-CN','en']
+        self.plugin.text_to_image=AsyncMock(return_value='https://images.example.com/x.png')
+        messages,_,_=await self.plugin._prepare(['it'],'image')
+        for call in self.plugin.text_to_image.await_args_list:
+            self.assertNotIn('example.com',call.args[0])
+            self.assertIn('某公司发布新芯片' if '某公司' in call.args[0] else 'New chip',call.args[0])
+        self.assertEqual(len(messages),2)
+        # Text messages still carry links per include_source_links.
+        self.plugin.ai.summarize=AsyncMock(return_value=('## 科技\n- 要点 https://example.com/c',''))
+        messages,_,_=await self.plugin._prepare(['it'],'text')
+        self.assertIn('https://example.com/c',messages[0].chain[0].text)
+
+    async def test_image_show_links_option_keeps_urls_in_images(self):
+        self.plugin.image_show_links=True
+        self.plugin.ai.summarize=AsyncMock(return_value=('## 科技\n- 要点 https://example.com/c',''))
+        self.plugin.text_to_image=AsyncMock(return_value='https://images.example.com/x.png')
+        await self.plugin._prepare(['it'],'image')
+        self.assertIn('https://example.com/c',self.plugin.text_to_image.call_args.args[0])
+
+    async def test_proxy_config_reaches_the_news_client_and_invalid_proxy_fails_fast(self):
+        plugin=plugin_module.DailyNewsPlugin(types.SimpleNamespace(send_message=AsyncMock()),
+            {'target_groups':[],'push_time':'08:00','news_fetch_proxy':'http://127.0.0.1:7890'})
+        try:
+            self.assertEqual(plugin.client.proxy,'http://127.0.0.1:7890')
+            self.assertEqual(plugin.weather.proxy,'http://127.0.0.1:7890')
+        finally:
+            await plugin.terminate()
+        with self.assertRaises(ValueError):
+            plugin_module.DailyNewsPlugin(types.SimpleNamespace(send_message=AsyncMock()),
+                {'target_groups':[],'push_time':'08:00','news_fetch_proxy':'socks5://127.0.0.1:1080'})
+
+    async def test_new_overseas_sources_are_queryable_and_off_by_default(self):
+        self.assertEqual(plugin_module.selected_sources({}),['60s','it','ai'])
+        self.assertEqual(plugin_module.resolve_source('BBC'),'bbc')
+        self.plugin.client.bundle=AsyncMock(return_value=[('bbc',source_module.normalize('bbc',{'data':[{'title':'Peace talks'}]}))])
+        messages,_,count=await self.plugin._prepare(['bbc'],'text')
+        self.assertEqual(count,1)
+        self.assertIn('Peace talks',messages[0].chain[0].text)

@@ -2,6 +2,33 @@
 
 今后每次版本更新均在此记录新增、修复、配置变更和验证边界。
 
+## v2.5.0 — 2026-09-26
+
+### 修复
+- **AI资讯快报恢复可用**：60s 的 `ai-news` 持续返回空数组（`{"date":"2026-09-25","news":[]}`），而唯一备用源 `qbitai.com/feed` 已开始返回 403/502，导致整个栏目不可用。现按顺序尝试 5 个互相独立的 feed：TechCrunch AI → Ars Technica AI → The Verge AI（Atom）→ MIT Technology Review → 量子位；哪个应答就在简报里标注哪个（provider 与 tip 均写明「非原快报内容」）。
+- 移除已死的聚合镜像 `60s.viki.moe`（所有路径返回 Cloudflare 403），不再每次抓取浪费一次请求和超时预算。
+- feed 解析从只支持 RSS 2.0（`channel/item` + `pubDate`）扩展到 Atom（`entry`/`link@href`/`updated`）与 RSS 1.0/RDF（根级 `item` + `dc:date`），并统一 RFC822/ISO8601（含 `Z` 与时区偏移）日期解析。
+
+### 新增
+- **9 个海外内置栏目**（默认关闭，需在配置里勾选）：BBC国际新闻、卫报国际新闻、纽约时报国际新闻、半岛电视台新闻、德国之声新闻、联合国新闻、英国政府新闻（政策前沿）、STAT医学新闻（医药前沿）、自然杂志快讯（医药前沿）。全部直接取各媒体自己的公开 feed，不需要填链接；关闭时仍可用 `/news bbc` 之类单独查询。分类为「国际新闻」「医药前沿」，与简报板块标题对应。
+- 新增 `news_fetch_proxy`：新闻与天气抓取共用，仅接受 `http://`/`https://` 形式（如 `http://127.0.0.1:7890`）。没有国际出口的服务器上，海外栏目需要它；格式非法会在启动时明确报错，不静默忽略；不支持 socks（aiohttp 需额外依赖）。
+- 新增 `news_fetch_timeout`（默认 10 秒，3–30）：单个上游请求超时。海外 feed 在部分网络下较慢（实测 Ars Technica 4.1 秒），旧的硬编码 6 秒会误判为不可用。每个栏目的整体截止时间 = 请求超时 × 端点数（上限 120 秒），不可达主机不会拖垮整次推送。
+- 新增 `image_show_links`（默认 **false**）：**图片不再显示链接**。渲染前去掉 Markdown 链接（保留标题文字）、`（URL）` 与裸 URL 行；文字消息是否带链接仍由 `include_source_links` 控制。
+
+### 验证
+- 真实探测（2026-09-26，本地沙箱）：TechCrunch AI 200/19KB、Ars Technica AI 200/77KB、The Verge AI 200/29KB、MIT Tech Review 200/102KB、BBC 200、Guardian 200、NYT 200、Al Jazeera 200、DW 200、UN News 200、GOV.UK 200、STAT News 200、Nature 200，且经 NewsClient 实抓各返回条目、日期为当天或前一天；`60s ai-news` 200 但 news 为空；qbitai 403/502。实测后剔除、避免长期「暂不可用」：NHK RSS（cat0/cat1/cat2 最新条目 2026-08-08，滞后 48 天）、WHO News RSS（最新 2026-02-25，滞后 7 个月）；未采用：CNN `rss.cnn.com`（连接失败）、机器之心 `/rss`（302 跳 HTML）、VentureBeat（429 验证页）、EurekAlert（404）、CDC（403）、Nature Medicine `nm.rss`（解析失败）。
+- 本地 115 项测试通过（Atom/RDF/dc:date 解析、AI 7天与新闻 14天窗口、feed 尝试顺序、恶意/空 feed 拒绝、代理校验、图片去链接、新栏目可单独查询、schema 类型递归校验），Windows 侧同步验证。
+
+### 网络可达性实测（2026-09-26，中国大陆出口的开发机，无代理，12秒超时）
+- 可直连：TechCrunch 0.9s、The Verge 0.8s、MIT Tech Review 0.5s、Ars Technica 4.1s、UN News 1.0s、GOV.UK 0.4s、STAT News 1.0s、Nature 1.0s。
+- 超时不可达：**BBC、卫报、纽约时报、半岛电视台、德国之声**（均 13 秒超时）→ 这些栏目需要配置 `news_fetch_proxy`，否则只会显示「暂不可用」。
+- 同一份代码在海外出口环境下 12/12 栏目全部成功（含 BBC/卫报/纽约时报/半岛/德国之声），说明是网络出口问题而非解析问题。
+
+### 注意
+- 海外 feed 在你的 AstrBot 服务器上是否可达取决于出口/代理，仓库环境无法代为验证；不可达时该栏目会明确标注「暂不可用」，不影响其他栏目。
+- 海外栏目多为英文/日文原文：开启 AI 总结时会被整理进中文板块；关闭 AI 时按原文标题直接汇总。
+- 新栏目默认关闭，避免在无国际出口的服务器上产生大量「暂不可用」噪声。
+
 ## v2.4.2 — 2026-09-26
 
 ### 修复

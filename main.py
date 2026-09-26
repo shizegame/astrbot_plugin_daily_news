@@ -9,14 +9,14 @@ from astrbot.api import logger
 from astrbot.core.message.message_event_result import MessageChain
 from astrbot.api.message_components import Plain, Image
 from .news_sources import NewsClient, SOURCES, selected_sources, resolve_source, text_pages
-from .news_digest import digest_text, digest_markdown
+from .news_digest import digest_text, digest_markdown, strip_links
 from .image_output import image_location
 from .ai_digest import AISummarizer
 from .weather import WeatherClient
 from .languages import LANGUAGES, language_list
 
 
-@register("astrbot_plugin_daily_news", "anka, shizegame", "内置多来源新闻、科技资讯与热榜推送", "2.4.2")
+@register("astrbot_plugin_daily_news", "anka, shizegame", "内置多来源新闻、科技资讯与热榜推送", "2.5.0")
 class DailyNewsPlugin(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
@@ -45,7 +45,11 @@ class DailyNewsPlugin(Star):
         self._last_send_status = "尚未发送"
         self.sources = selected_sources(config.get("news_sources", {}))
         self.include_links = config.get("include_source_links", True)
-        self.client = NewsClient(config.get("items_per_source", 5), config.get("cache_seconds", 600))
+        # An invalid proxy must fail at startup, not silently fetch direct.
+        self.client = NewsClient(config.get("items_per_source", 5), config.get("cache_seconds", 600),
+                                 proxy=config.get("news_fetch_proxy", ""),
+                                 timeout=config.get("news_fetch_timeout", 10))
+        self.image_show_links = config.get("image_show_links", False) is True
         self._message_interval = 0.35
         self._broadcast_lock = asyncio.Lock()
         self._daily_task = asyncio.create_task(self.daily_task())
@@ -57,6 +61,9 @@ class DailyNewsPlugin(Star):
         return "\n\n".join(text_pages(news_data, self.include_links))
 
     async def _render_image(self, text):
+        if not self.image_show_links:
+            # Links are not clickable in an image and only cost vertical space.
+            text = strip_links(text)
         # AstrBot owns the renderer, fonts and backend configuration. The
         # reference plugin uses this same Star API, not custom Pillow drawing.
         async with self._render_lock:

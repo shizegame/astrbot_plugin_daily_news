@@ -19,6 +19,16 @@
 
 每日 60 秒新闻推送插件 - 自动推送每日热点新闻，让你的群聊成员快速了解全球大事！
 
+## v2.5.0：修复AI快报、新增海外栏目、图片不带链接
+
+- **AI资讯快报**：60s 的 `ai-news` 返回空数据、量子位 feed 又变成 403/502，栏目整体不可用。现在依次尝试 5 个独立 feed（TechCrunch AI、Ars Technica AI、The Verge AI、MIT Technology Review、量子位），谁应答就标注谁，并明确写「非原快报内容」。同时移除已死的 `60s.viki.moe` 镜像；feed 解析新增 Atom 与 RSS1.0/RDF（`dc:date`）支持。
+- **海外栏目**（默认关闭，去配置里勾选即可，不需要填链接）：`bbc` BBC国际新闻、`guardian` 卫报国际新闻、`nyt` 纽约时报国际新闻、`aljazeera` 半岛电视台新闻、`dw` 德国之声新闻、`un` 联合国新闻、`govuk` 英国政府新闻（政策前沿）、`statnews` STAT医学新闻（医药前沿）、`nature` 自然杂志快讯（医药前沿）。分类对应简报里的「国际新闻」「政策前沿」「医药前沿」板块。NHK 与 WHO 的官方 RSS 实测分别滞后 48 天和 7 个月，已剔除，避免长期显示「暂不可用」。
+- **代理**：新增 `news_fetch_proxy`（只支持 `http://`/`https://`，例如 `http://127.0.0.1:7890`），新闻与天气共用。服务器没有国际出口时，海外栏目必须靠它；填错格式启动即报错。
+- **图片不显示链接**：新增 `image_show_links`，默认关闭 → 渲染图片前去掉 Markdown 链接（保留标题文字）、`（URL）` 和裸 URL；文字消息仍按 `include_source_links` 附链接。
+- **网络可达性（2026-09-26 实测，中国大陆出口开发机、无代理、12秒超时）**：可直连 TechCrunch 0.9s、The Verge 0.8s、MIT Tech Review 0.5s、Ars Technica 4.1s、UN News 1.0s、GOV.UK 0.4s、STAT News 1.0s、Nature 1.0s；**BBC、卫报、纽约时报、半岛电视台、德国之声全部 13 秒超时**，必须配置 `news_fetch_proxy` 才可用。同一份代码在海外出口环境下 12/12 栏目全部成功，说明是出口问题而非解析问题。
+- 新增 `news_fetch_timeout`（默认 10 秒，3–30）：海外 feed 较慢（实测 Ars Technica 4.1 秒），旧的固定 6 秒会误判为不可用；单栏目整体截止 = 请求超时 × 端点数（上限 120 秒），不可达主机不会拖垮整次推送。
+- 边界：海外 feed 在你 AstrBot 服务器上的可达性取决于出口/代理，不可达时该栏目标注「暂不可用」，不影响其他栏目；`/news bbc` 可单独测试某一栏目。「政策前沿」目前只有 GOV.UK（英国政府）与联合国新闻这类海外素材，**国内政策专属源仍未实现，不宣称**。
+
 ## v2.4.2：修复配置类型导致的加载失败
 
 - v2.4.1 新增的 `language_label_style` 类型误写成 `str`，AstrBot 只支持 `int/float/bool/string/text/list/file/object/template_list/dict`，会在解析 `_conf_schema.json` 时抛 `TypeError: 不受支持的配置类型 str`，插件配置页/加载随之失败。已改为 `string`（默认 `title`，非法值按 `title` 处理）。
