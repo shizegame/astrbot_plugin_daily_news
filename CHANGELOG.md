@@ -2,6 +2,20 @@
 
 今后每次版本更新均在此记录新增、修复、配置变更和验证边界。
 
+## v2.4.2 — 2026-09-26
+
+### 修复
+- `_conf_schema.json` 里 `language_label_style` 的类型误写为 `str`。AstrBot 只接受 int/float/bool/string/text/list/file/object/template_list/dict（`astrbot/core/config/astrbot_config.py::_config_schema_to_default_config` 会直接抛 `TypeError: 不受支持的配置类型 str`），导致插件配置解析失败。已改为 `string`，默认值仍是 `title`，非法值按 `title` 处理。
+
+### 新增
+- 新增 `tests/test_conf_schema.py`：递归校验每个配置项（含 `object.items`）的类型都在 AstrBot 支持列表内、都有 description、default 与声明类型一致；并断言 schema 默认值能被插件读取器（`language_list`、`AISummarizer`、`WeatherClient`）直接接受、hint 中记录的数值范围与代码钳制一致、`news_sources` 全为 bool 且不全关闭。同类错误以后在测试阶段就失败，不会再发到用户端。
+
+### 验证
+- 本地 100 项测试通过；Windows 侧同步验证。真实 AstrBot WebUI 配置页加载需更新后确认。
+
+### 注意
+- 只改配置声明，运行时行为与 v2.4.1 相同；已按 v2.4.1 说明调大超时的配置无需重设。
+
 ## v2.4.1 — 2026-09-26
 
 ### 修复

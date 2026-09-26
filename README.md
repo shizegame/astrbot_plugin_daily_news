@@ -19,6 +19,12 @@
 
 每日 60 秒新闻推送插件 - 自动推送每日热点新闻，让你的群聊成员快速了解全球大事！
 
+## v2.4.2：修复配置类型导致的加载失败
+
+- v2.4.1 新增的 `language_label_style` 类型误写成 `str`，AstrBot 只支持 `int/float/bool/string/text/list/file/object/template_list/dict`，会在解析 `_conf_schema.json` 时抛 `TypeError: 不受支持的配置类型 str`，插件配置页/加载随之失败。已改为 `string`（默认 `title`，非法值按 `title` 处理）。
+- 新增 `tests/test_conf_schema.py`：递归校验所有配置项类型合法、有 description、default 与类型一致，并断言 schema 默认值能被 `language_list`/`AISummarizer`/`WeatherClient` 直接接受、hint 里的范围与代码钳制一致。此类问题以后在测试阶段就会暴露。
+- 运行时行为与 v2.4.1 一致；已调大的超时配置无需重设。
+
 ## v2.4.1：修复回退文档没有标题、多语言标题丢失
 
 - **回退文档改成 Markdown**：AI总结超时/失败/关闭时，图片与翻译改用 `# 新闻与热榜汇总 · 日期` + `## 栏目 · 分类` + 编号条目的 Markdown 文档，不再是 `【栏目名 · 分类】` 纯文本。这就是“翻译之后大标题不见了、满屏【】”的原因——那份【】文本被翻译并渲染成图片。中文文字消息仍保留【】格式（聊天里不渲染 Markdown），`/news_raw` 不变。

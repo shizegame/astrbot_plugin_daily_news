@@ -399,3 +399,11 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         self.plugin.label_style='title'
         messages,_,_=await self.plugin._prepare(['it'],'text')
         self.assertIn('# Daily Digest',messages[1].chain[0].text)
+
+    async def test_invalid_label_style_falls_back_to_title(self):
+        plugin=plugin_module.DailyNewsPlugin(types.SimpleNamespace(send_message=AsyncMock()),
+            {'target_groups':[],'push_time':'08:00','language_label_style':'fancy'})
+        try:
+            self.assertEqual(plugin.label_style,'title')
+        finally:
+            await plugin.terminate()

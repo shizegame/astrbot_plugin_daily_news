@@ -256,9 +256,9 @@
     "hint": "1–4。多语言同时翻译可显著缩短总耗时，但会同时发起多个模型请求；模型限流时请调小。"
   },
   "language_label_style": {
-    "type": "str",
+    "type": "string",
     "description": "语言标识方式",
     "default": "title",
-    "hint": "title=各语言用本地化大标题（推荐）；bracket=额外加【语言】前缀行；none=不加标识。"
+    "hint": "可选值：title（各语言用本地化大标题，推荐）、bracket（额外加【语言】前缀行）、none（不加标识）。填写其他值时按 title 处理。"
   }
 }

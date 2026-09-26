@@ -16,7 +16,7 @@ from .weather import WeatherClient
 from .languages import LANGUAGES, language_list
 
 
-@register("astrbot_plugin_daily_news", "anka, shizegame", "内置多来源新闻、科技资讯与热榜推送", "2.4.1")
+@register("astrbot_plugin_daily_news", "anka, shizegame", "内置多来源新闻、科技资讯与热榜推送", "2.4.2")
 class DailyNewsPlugin(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
