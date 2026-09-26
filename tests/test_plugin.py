@@ -54,7 +54,7 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
             if target == 'broken':
                 raise ValueError('send failure')
             self.sent.append((target, message))
-        self.plugin = plugin_module.DailyNewsPlugin(types.SimpleNamespace(send_message=send), {'target_groups': ['group1'], 'push_time': '08:00'})
+        self.plugin = plugin_module.DailyNewsPlugin(types.SimpleNamespace(send_message=send), {'target_groups': ['group1'], 'push_time': '08:00', 'news_languages':['zh-CN']})
         async def request(url):
             if url.endswith('/bili'):
                 raise ValueError('down')
@@ -304,3 +304,54 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         messages, failed, count = await self.plugin._prepare(self.plugin.sources,'text',use_ai=False)
         self.assertGreater(count,0)
         self.assertIn('天气暂不可用：上海',messages[0].chain[0].text)
+
+    async def test_two_languages_are_two_images_with_one_fetch(self):
+        self.plugin.languages=['zh-CN','en']
+        self.plugin.client.bundle=AsyncMock(return_value=[('it',source_module.normalize('it',{'data':[{'title':'新闻'}]}))])
+        self.plugin.ai.summarize=AsyncMock(return_value=('## 科技\n中文简报',''))
+        self.plugin.ai.translate=AsyncMock(return_value='## Technology\nEnglish digest')
+        self.plugin.text_to_image=AsyncMock(side_effect=['https://images.example.com/zh.png','https://images.example.com/en.png'])
+        messages,_,_=await self.plugin._prepare(['it'],'image')
+        self.assertEqual(len(messages),2)
+        self.assertEqual(messages[0].chain,[('image-url','https://images.example.com/zh.png')])
+        self.assertEqual(messages[1].chain,[('image-url','https://images.example.com/en.png')])
+        self.plugin.client.bundle.assert_awaited_once()
+        self.plugin.ai.summarize.assert_awaited_once()
+        self.plugin.ai.translate.assert_awaited_once()
+        await self.plugin._dispatch(['group1'],messages)
+        self.assertEqual(len(self.sent),2)
+
+    async def test_two_text_editions_and_long_translation_pages(self):
+        self.plugin.languages=['zh-CN','en']
+        self.plugin.ai.summarize=AsyncMock(return_value=('中文正文',''))
+        self.plugin.ai.translate=AsyncMock(return_value=('English news line.\n'*300))
+        messages,_,_=await self.plugin._prepare(['it'],'text')
+        self.assertIn('简体中文',messages[0].chain[0].text)
+        self.assertIn('English',messages[1].chain[0].text)
+        self.assertGreater(len(messages),2)
+        self.assertTrue(all(len(m.chain[0].text)<=3200 for m in messages))
+        self.plugin._digest_image.assert_not_awaited()
+
+    async def test_failed_translation_does_not_block_next_language(self):
+        self.plugin.languages=['zh-CN','en','ja']
+        self.plugin.ai.summarize=AsyncMock(return_value=('中文正文',''))
+        self.plugin.ai.translate=AsyncMock(side_effect=[ValueError('private-token'),'日本語ニュース'])
+        messages,_,_=await self.plugin._prepare(['it'],'text')
+        self.assertEqual(len(messages),3)
+        self.assertIn('翻译失败',messages[1].chain[0].text)
+        self.assertNotIn('private-token',messages[1].chain[0].text)
+        self.assertIn('日本語ニュース',messages[2].chain[0].text)
+
+    async def test_failed_send_continues_other_language(self):
+        self.plugin.context.send_message=AsyncMock(side_effect=[RuntimeError('upload failed'),True])
+        messages=[self.plugin._chain(Plain('中文')),self.plugin._chain(Plain('English'))]
+        sent,failed=await self.plugin._dispatch(['group1'],messages)
+        self.assertEqual((sent,failed),(0,1))
+        self.assertEqual(self.plugin.context.send_message.await_count,2)
+
+    async def test_raw_bypasses_multilingual_translation(self):
+        self.plugin.languages=['zh-CN','en']
+        self.plugin.ai.translate=AsyncMock(side_effect=AssertionError('must not translate'))
+        messages,_,_=await self.plugin._prepare(['it'],'text',use_ai=False)
+        self.assertEqual(len(messages),1)
+        self.plugin.ai.translate.assert_not_awaited()

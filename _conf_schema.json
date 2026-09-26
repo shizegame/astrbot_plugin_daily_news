@@ -221,5 +221,20 @@
     "description": "天气请求最小间隔（秒）",
     "default": 3,
     "hint": "0–10秒；请求自动排队，失败冷却2分钟。"
+  },
+  "multilingual_enabled": {
+    "type": "bool",
+    "description": "启用多语言新闻",
+    "default": true,
+    "hint": "默认中文+英文，各语言分别发图/文字。翻译会调用模型，即使关闭AI总结。/news_raw始终绕过AI和翻译。"
+  },
+  "news_languages": {
+    "type": "list",
+    "description": "新闻语言及发送顺序（最多5种）",
+    "default": [
+      "zh-CN",
+      "en"
+    ],
+    "hint": "支持 zh-CN简中、zh-TW繁中、en英文、ja日文、ko韩文、fr法文、de德文、es西文、ru俄文、ar阿文；去重后按列表顺序发送。仅中文可关闭多语言或只保留zh-CN。"
   }
 }

@@ -1,6 +1,6 @@
 name: astrbot_plugin_daily_news
 desc: 内置12个新闻与热榜栏目，无需配置订阅链接；请设置推送目标和时间
 help: 内置12个新闻与热榜栏目，无需配置订阅链接；请设置推送目标和时间
-version: v2.3.1
+version: v2.4.0
 author: anka, shizegame
 repo: https://github.com/shizegame/astrbot_plugin_daily_news
