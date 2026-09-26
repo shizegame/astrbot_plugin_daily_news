@@ -12,14 +12,16 @@ from .news_sources import NewsClient, SOURCES, selected_sources, resolve_source,
 from .news_digest import digest_text, digest_image_text
 from .image_output import image_location
 from .ai_digest import AISummarizer
+from .weather import WeatherClient
 
 
-@register("astrbot_plugin_daily_news", "anka, shizegame", "内置多来源新闻、科技资讯与热榜推送", "2.3.0")
+@register("astrbot_plugin_daily_news", "anka, shizegame", "内置多来源新闻、科技资讯与热榜推送", "2.3.1")
 class DailyNewsPlugin(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
         self.config = config
         self.ai = AISummarizer(context, config)
+        self.weather = WeatherClient(config)
         self.target_groups = config.get("target_groups", [])
         self.push_time = config.get("push_time", "08:00")
         # Fail clearly on invalid configuration instead of repeatedly retrying.
@@ -90,18 +92,27 @@ class DailyNewsPlugin(Star):
                 logger.warning(f"[每日新闻] {SOURCES[source][0]} 暂不可用")
             else:
                 columns.append(data)
+        if self.weather.enabled and set(sources) == set(self.sources):
+            weather, weather_notice = await self.weather.get()
+            if weather:
+                columns.insert(0, weather)
+            if weather_notice:
+                failed.append(weather_notice)
+        ai_text = None
         if use_ai:
-            columns, ai_notice = await self.ai.summarize(columns, umo)
+            ai_text, ai_notice = await self.ai.summarize(columns, umo)
             if ai_notice and columns:
                 logger.warning("[每日新闻] " + self.ai.status)
                 columns = copy.deepcopy(columns)
                 columns[0]["tip"] = ai_notice + columns[0].get("tip", "")
+        if ai_text and failed:
+            ai_text += "\n\n暂不可用：" + "、".join(failed)[:240]
         components = []
         image_ok = False
         image_failed = False
         if mode != "text" and columns:
             try:
-                image = await self._digest_image(columns, failed)
+                image = await self._render_image(ai_text) if ai_text else await self._digest_image(columns, failed)
                 if not image:
                     raise ValueError("没有生成汇总图片")
                 components.append(image)
@@ -110,7 +121,7 @@ class DailyNewsPlugin(Star):
                 image_failed = True
                 logger.warning("[每日新闻] 汇总图片生成失败，降级为一条文字消息")
         if mode != "image" or not image_ok:
-            text = digest_text(columns, failed, self.include_links, max_chars=3400)
+            text = ai_text or digest_text(columns, failed, self.include_links, max_chars=3400)
             if image_failed:
                 text = "图片渲染失败，已改为文字。请管理员运行 /news_image_test，并检查 AstrBot 文转图设置和插件日志。\n" + text
             components.append(Plain(text))
@@ -188,11 +199,12 @@ class DailyNewsPlugin(Star):
     async def check_status(self, event: AstrMessageEvent):
         seconds = self.calculate_sleep_time()
         yield event.plain_result(
-            "每日新闻插件 v2.3.0\n"
+            "每日新闻插件 v2.3.1\n"
             f"目标：{', '.join(map(str, self.target_groups))}\n"
             f"推送时间：{self.push_time}（服务器时区）\n"
             f"启用栏目：{'、'.join(SOURCES[key][0] for key in self.sources) or '无'}\n"
             f"每个新增栏目最多 {self.client.limit} 条；缓存 {self.client.ttl} 秒\n"
+            f"天气：{self.weather.status}；配置城市：{'、'.join(self.weather.cities) or '未设置'}\n"
             f"AI总结：{self.ai.status}；模型：{self.ai.provider_id or 'AstrBot 当前/默认模型'}\n"
             f"默认查询模式：{self.default_news_mode}；转图：AstrBot text_to_image\n"
             f"最近图片生成：{self._last_image_status}\n"
@@ -270,3 +282,4 @@ class DailyNewsPlugin(Star):
         with suppress(asyncio.CancelledError):
             await self._daily_task
         await self.client.close()
+        await self.weather.close()

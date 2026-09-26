@@ -268,7 +268,7 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         import json
         del self.plugin._digest_image
         self.plugin.ai.provider_id = 'test-provider'
-        self.plugin.context.llm_generate = AsyncMock(return_value=types.SimpleNamespace(completion_text=json.dumps({'sections':[{'source_id':'it','items':[{'index':1,'summary':'模型整理的重点'}]}]},ensure_ascii=False)))
+        self.plugin.context.llm_generate = AsyncMock(return_value=types.SimpleNamespace(completion_text='## 科技前沿\n模型整理的重点'))
         self.plugin.text_to_image = AsyncMock(return_value='https://images.example.com/ai.png')
         messages, _, _ = await self.plugin._prepare(['it'], 'all', 'session')
         self.assertIn('模型整理的重点', self.plugin.text_to_image.call_args.args[0])
@@ -283,3 +283,24 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(replies)
         self.plugin.ai.summarize.assert_not_awaited()
         self.assertIn('新闻', self.sent[0][1].chain[0].text)
+
+    async def test_weather_included_in_all_sources_not_single_column(self):
+        self.plugin.weather.enabled = True
+        weather = {'source_id':'weather','source_name':'天气','category':'天气','provider':'Open-Meteo','items':[{'title':'上海，25℃','url':'https://open-meteo.com/'}],'source_date':'2026-09-26','fetched_at':'now','tip':''}
+        self.plugin.weather.get = AsyncMock(return_value=(weather,''))
+        self.plugin.ai.summarize = AsyncMock(return_value=('## 每日简报\n天气与新闻已整理',''))
+        self.plugin.text_to_image = AsyncMock(return_value='https://images.example.com/full.png')
+        await self.plugin._prepare(self.plugin.sources,'image')
+        self.plugin.weather.get.assert_awaited_once()
+        material = self.plugin.ai.summarize.call_args.args[0]
+        self.assertEqual(material[0]['source_id'],'weather')
+        self.assertIn('天气与新闻', self.plugin.text_to_image.call_args.args[0])
+        await self.plugin._prepare(['it'],'text')
+        self.plugin.weather.get.assert_awaited_once()
+
+    async def test_weather_failure_does_not_block_news(self):
+        self.plugin.weather.enabled = True
+        self.plugin.weather.get = AsyncMock(return_value=(None,'天气暂不可用：上海'))
+        messages, failed, count = await self.plugin._prepare(self.plugin.sources,'text',use_ai=False)
+        self.assertGreater(count,0)
+        self.assertIn('天气暂不可用：上海',messages[0].chain[0].text)
