@@ -6,6 +6,7 @@ import sys
 import types
 import unittest
 from unittest.mock import AsyncMock
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 package = types.ModuleType('daily_news_test_plugin')
@@ -25,12 +26,16 @@ class Plain:
 
 class Image:
     @staticmethod
-    def fromBase64(value):
-        return ('image', value)
+    def fromURL(value):
+        return ('image-url', value)
+
+    @staticmethod
+    def fromFileSystem(value):
+        return ('image-file', value)
 
 for name in ('astrbot', 'astrbot.api', 'astrbot.api.event', 'astrbot.api.star', 'astrbot.core', 'astrbot.core.message', 'astrbot.core.message.message_event_result', 'astrbot.api.message_components'):
     sys.modules[name] = types.ModuleType(name)
-sys.modules['astrbot.api'].logger = types.SimpleNamespace(info=lambda *a: None, warning=lambda *a: None, error=lambda *a: None)
+sys.modules['astrbot.api'].logger = types.SimpleNamespace(info=lambda *a, **kw: None, warning=lambda *a, **kw: None, error=lambda *a, **kw: None)
 sys.modules['astrbot.api.event'].filter = types.SimpleNamespace(command=decorator, permission_type=decorator, PermissionType=types.SimpleNamespace(ADMIN='admin'))
 sys.modules['astrbot.api.event'].AstrMessageEvent = object
 sys.modules['astrbot.api.star'].Star = Star
@@ -39,9 +44,6 @@ sys.modules['astrbot.api.star'].register = decorator
 sys.modules['astrbot.core.message.message_event_result'].MessageChain = type('MessageChain', (), {})
 sys.modules['astrbot.api.message_components'].Plain = Plain
 sys.modules['astrbot.api.message_components'].Image = Image
-image_stub = types.ModuleType('daily_news_test_plugin.news_image_generator')
-image_stub.create_news_image_from_data = lambda *a: 'encoded-image'
-sys.modules[image_stub.__name__] = image_stub
 plugin_module = importlib.import_module('daily_news_test_plugin.main')
 source_module = importlib.import_module('daily_news_test_plugin.news_sources')
 
@@ -61,8 +63,7 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
             return {'data': [{'title': '新闻', 'link': 'https://example.com'}]}
         self.plugin._message_interval = 0
         self.plugin.client.requester = request
-        self.plugin._image = AsyncMock(return_value='encoded-image')
-        self.plugin._digest_image = AsyncMock(return_value='merged-image')
+        self.plugin._digest_image = AsyncMock(return_value=('image', 'merged-image'))
 
     async def asyncTearDown(self):
         await self.plugin.terminate()
@@ -71,7 +72,7 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         messages, errors, count = await self.plugin._prepare(['60s', 'it'], 'text')
         self.assertEqual(count, 2)
         self.assertFalse(errors)
-        self.plugin._image.assert_not_awaited()
+        self.plugin._digest_image.assert_not_awaited()
         self.assertTrue(all(isinstance(msg.chain[0], Plain) for msg in messages))
 
     async def test_image_failure_falls_back_to_text(self):
@@ -120,7 +121,7 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(replies)
         self.assertEqual(len(self.sent), 1)
         self.assertIn('每日60秒', self.sent[0][1].chain[0].text)
-        self.plugin._image.assert_not_awaited()
+        self.plugin._digest_image.assert_not_awaited()
 
     async def test_broadcast_is_admin_only_in_source(self):
         self.assertIn('@filter.permission_type(filter.PermissionType.ADMIN)', (ROOT / 'main.py').read_text(encoding='utf-8'))
@@ -170,3 +171,95 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(messages[0].chain), 1)
         self.assertIn('没有获取到可用内容', messages[0].chain[0].text)
         self.plugin._digest_image.assert_not_awaited()
+
+    async def test_news_without_mode_uses_image_by_default(self):
+        event = types.SimpleNamespace(unified_msg_origin='current', plain_result=lambda value: value, stop_event=lambda: None)
+        replies = [msg async for msg in self.plugin.news(event)]
+        self.assertFalse(replies)
+        self.plugin._digest_image.assert_awaited_once()
+        self.assertEqual(self.sent[0][1].chain, [('image', 'merged-image')])
+
+    async def test_news_explicit_text_overrides_default_image(self):
+        event = types.SimpleNamespace(unified_msg_origin='current', plain_result=lambda value: value, stop_event=lambda: None)
+        replies = [msg async for msg in self.plugin.news(event, 'it', 'text')]
+        self.assertFalse(replies)
+        self.plugin._digest_image.assert_not_awaited()
+        self.assertIsInstance(self.sent[0][1].chain[0], Plain)
+
+    async def test_render_url_uses_official_api_and_url_component(self):
+        self.plugin.text_to_image = AsyncMock(return_value='https://images.example.com/report.png')
+        data = source_module.normalize('it', {'data':[{'title':'title'}]})
+        image = await plugin_module.DailyNewsPlugin._digest_image(self.plugin, [data], [])
+        self.assertEqual(image, ('image-url', 'https://images.example.com/report.png'))
+        self.plugin.text_to_image.assert_awaited_once()
+        self.assertTrue(self.plugin.text_to_image.call_args.kwargs['return_url'])
+        self.assertIn('IT之家', self.plugin.text_to_image.call_args.args[0])
+
+    async def test_renderer_local_path_is_not_treated_as_url_or_base64(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'rendered image.png'
+            path.write_bytes(b'image')
+            self.plugin.text_to_image = AsyncMock(return_value=str(path))
+            result = await self.plugin._render_image('test')
+            self.assertEqual(result, ('image-file', str(path.resolve())))
+
+    async def test_empty_render_result_falls_back_with_actionable_notice(self):
+        self.plugin.text_to_image = AsyncMock(return_value='')
+        del self.plugin._digest_image
+        messages, _, count = await self.plugin._prepare(['it'], 'image')
+        self.assertEqual(count, 1)
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(len(messages[0].chain), 1)
+        self.assertIn('/news_image_test', messages[0].chain[0].text)
+        self.assertIn('失败', self.plugin._last_image_status)
+
+    async def test_render_timeout_has_clear_status(self):
+        async def stalled(*args, **kwargs):
+            await asyncio.sleep(60)
+        self.plugin.text_to_image = stalled
+        self.plugin.render_timeout = 0.01
+        with self.assertRaisesRegex(RuntimeError, '超时'):
+            await self.plugin._render_image('test')
+        self.assertIn('超时', self.plugin._last_image_status)
+
+    async def test_image_diagnostic_does_not_fetch_news(self):
+        self.plugin.client.bundle = AsyncMock(side_effect=AssertionError('must not fetch'))
+        self.plugin.text_to_image = AsyncMock(return_value='https://images.example.com/test.png')
+        event = types.SimpleNamespace(unified_msg_origin='current', plain_result=lambda value: value, stop_event=lambda: None)
+        replies = [msg async for msg in self.plugin.image_test(event)]
+        self.assertFalse(replies)
+        self.plugin.client.bundle.assert_not_awaited()
+        self.assertEqual(self.sent[0][1].chain, [('image-url', 'https://images.example.com/test.png')])
+
+    async def test_diagnostic_distinguishes_upload_failure_from_render_failure(self):
+        self.plugin.text_to_image = AsyncMock(return_value='https://images.example.com/test.png')
+        self.plugin.context.send_message = AsyncMock(return_value=False)
+        event = types.SimpleNamespace(unified_msg_origin='current', plain_result=lambda value: value, stop_event=lambda: None)
+        replies = [msg async for msg in self.plugin.image_test(event)]
+        self.assertIn('图片已生成，但平台发送失败', replies[0])
+        self.assertIn('成功', self.plugin._last_image_status)
+        self.assertIn('失败', self.plugin._last_send_status)
+
+    async def test_renderer_exception_falls_back_without_exposing_secret(self):
+        self.plugin.text_to_image = AsyncMock(side_effect=RuntimeError('private-token-do-not-display'))
+        del self.plugin._digest_image
+        messages, _, _ = await self.plugin._prepare(['it'], 'image')
+        self.assertIn('图片渲染失败', messages[0].chain[0].text)
+        self.assertNotIn('private-token', messages[0].chain[0].text)
+
+    async def test_cancellation_propagates_and_releases_render_lock(self):
+        self.plugin.text_to_image = AsyncMock(side_effect=asyncio.CancelledError())
+        with self.assertRaises(asyncio.CancelledError):
+            await self.plugin._render_image('test')
+        self.assertFalse(self.plugin._render_lock.locked())
+
+    async def test_real_digest_flow_calls_renderer_once_for_all_columns(self):
+        del self.plugin._digest_image
+        self.plugin.text_to_image = AsyncMock(return_value='https://images.example.com/all.png')
+        messages, _, _ = await self.plugin._prepare(list(source_module.SOURCES), 'image')
+        self.plugin.text_to_image.assert_awaited_once()
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0].chain, [('image-url', 'https://images.example.com/all.png')])
+        document = self.plugin.text_to_image.call_args.args[0]
+        for name, *_ in source_module.SOURCES.values():
+            self.assertIn(name, document)

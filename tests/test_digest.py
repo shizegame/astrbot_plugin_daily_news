@@ -1,15 +1,11 @@
-import base64
-from io import BytesIO
 from pathlib import Path
 import sys
 import unittest
-from unittest.mock import patch
-from PIL import Image, ImageDraw, ImageFont
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from news_sources import SOURCES, normalize
-from news_digest import digest_text, create_digest_image, _wrap
+from news_digest import digest_text, digest_image_text, markdown_literal
 
 
 def columns():
@@ -42,20 +38,20 @@ class DigestTests(unittest.TestCase):
         self.assertIn('https://example.com/news', digest_text([data]))
         self.assertNotIn('https://example.com/news', digest_text([data], include_links=False))
 
-    def test_wrap_has_explicit_ellipsis(self):
-        draw = ImageDraw.Draw(Image.new('RGB', (300, 1)))
-        font = ImageFont.load_default()
-        rows = _wrap(draw, 'long headline ' * 40, font, 100, 3)
-        self.assertEqual(len(rows), 3)
-        self.assertTrue(rows[-1].endswith('…'))
+    def test_whole_document_input_contains_all_source_sections(self):
+        text = digest_image_text(columns(), ['B站不可用'])
+        for name, *_ in SOURCES.values():
+            self.assertIn(markdown_literal(name), text)
+        self.assertEqual(text.count('## 暂不可用'), 1)
+        self.assertIn('B站不可用', text)
+        self.assertNotIn('https://example.com', text)
 
-    def test_composite_png_contains_all_columns_in_one_image(self):
-        # Real bundled Chinese font is required in the repository smoke test.
-        font_path = ROOT / 'assets' / '微软雅黑.ttf'
-        if not font_path.exists():
-            self.skipTest('bundled font is available in the remote repository')
-        image = Image.open(BytesIO(base64.b64decode(create_digest_image(columns(), ['不可用栏目']))))
-        self.assertEqual(image.format, 'PNG')
-        self.assertEqual(image.width, 1440)
-        self.assertLess(image.height, 12000)
-        self.assertGreater(image.height, 1000)
+    def test_news_cannot_inject_remote_images_or_html_into_renderer(self):
+        text = markdown_literal('![x](http://127.0.0.1/private) <script>alert(1)</script>')
+        self.assertNotIn('![x]', text)
+        self.assertNotIn('<script>', text)
+        self.assertIn('&lt;script', text)
+
+    def test_image_document_requires_content(self):
+        with self.assertRaises(ValueError):
+            digest_image_text([])

@@ -19,12 +19,6 @@
     "hint": "是否显示文字新闻，默认隐藏",
     "default": false
   },
-  "use_local_image_draw": {
-    "description": "是否使用本地图片绘制",
-    "type": "bool",
-    "hint": "是否使用本地图片绘制，为否则使用api获取图片",
-    "default": false
-  },
   "news_sources": {
     "description": "内置栏目开关（定时推送及 /news all）",
     "type": "object",
@@ -120,5 +114,22 @@
     "description": "文字消息附带原文链接",
     "type": "bool",
     "default": true
+  },
+  "default_news_mode": {
+    "description": "/news 默认输出模式",
+    "type": "string",
+    "options": [
+      "image",
+      "text",
+      "all"
+    ],
+    "default": "image",
+    "hint": "image=一张汇总图，text=一条文字，all=图文一次发送。显式命令参数优先。"
+  },
+  "image_render_timeout": {
+    "description": "AstrBot 文转图超时（秒）",
+    "type": "int",
+    "default": 60,
+    "hint": "范围10–120。使用 AstrBot 文转图服务，不再用插件内置 Pillow 绘图；失败时明确提示并降级文字。"
   }
 }

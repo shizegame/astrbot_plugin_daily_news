@@ -19,6 +19,19 @@
 
 每日 60 秒新闻推送插件 - 自动推送每日热点新闻，让你的群聊成员快速了解全球大事！
 
+## v2.2.3：默认图片输出，使用 AstrBot 官方文转图
+
+> 以下 v2.2.1 及更早章节的旧海报、原图和双栏绘图说明属于历史记录；当前渲染方式与配置以本节为准。
+
+- `/news`、`/news all` 默认输出图片（可在「/news 默认输出模式」中修改）。`/news all image` 强制图片，`/news all text` 明确只发文字，`/news all all` 图文一次发送。
+- 主要参考 [SeaSmall/daily-digest](https://github.com/SeaSmall/astrbot-plugin-daily-digest) 的流程：整份简报文本 → `await self.text_to_image(text, return_url=True)` → 图片消息。API 用法见 [AstrBot 官方文转图文档](https://docs.astrbot.app/dev/star/guides/html-to-pic.html)。这次采用 text_to_image，不是自定义 HTML 模板。
+- URL 使用 `Image.fromURL`，本地图片路径使用 `Image.fromFileSystem`，不再把返回值当作 Base64。由 AstrBot 与平台适配器处理图片发送。
+- 所有栏目（包括单独 60 秒早报）统一走 AstrBot 转图，旧配置 `use_local_image_draw` 不再使用。历史绘图文件保留，但主流程不再导入、不依赖它们，插件不再额外要求安装 Pillow。
+- 转图需 AstrBot 自身的文转图后端正常可用；本插件不自动修改 AstrBot 全局渲染设置。后端返回图片 URL 时，机器人/平台还必须能访问该 URL；跨环境本地文件发送是否支持取决于适配器。
+- 管理员运行 `/news_image_test` 可在不抓取新闻的情况下单独测试渲染与发送；`/news_status` 可查看默认模式、最近渲染状态及最近发送状态。渲染成功不等于平台已接收。
+- 转图失败或超时会明确提示后降级成一条汇总文字，不会静默伪装为图片成功。平台发送失败会记录异常，不自动重复发送，以免部分已送达时刷屏。
+- 本次优先修复图片输出；此前讨论的天气、医药、政策、AI 总结等完整简报扩展尚未在此版本实现。
+
 ## 安装与更新地址（v2.2.2）
 
 本仓库是多源汇总增强版，安装时请使用：

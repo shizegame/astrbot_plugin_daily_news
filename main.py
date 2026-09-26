@@ -1,21 +1,18 @@
 import asyncio
-import base64
 import datetime
 from contextlib import suppress
 
-import aiohttp
 from astrbot.api.event import filter, AstrMessageEvent
 from astrbot.api.star import Context, Star, register
 from astrbot.api import logger
 from astrbot.core.message.message_event_result import MessageChain
 from astrbot.api.message_components import Plain, Image
-from .news_image_generator import create_news_image_from_data
 from .news_sources import NewsClient, SOURCES, selected_sources, resolve_source, text_pages
-from .source_image import create_source_image
-from .news_digest import digest_text, create_digest_image
+from .news_digest import digest_text, digest_image_text
+from .image_output import image_location
 
 
-@register("astrbot_plugin_daily_news", "anka, shizegame", "内置多来源新闻、科技资讯与热榜推送", "2.2.2")
+@register("astrbot_plugin_daily_news", "anka, shizegame", "内置多来源新闻、科技资讯与热榜推送", "2.2.3")
 class DailyNewsPlugin(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
@@ -26,7 +23,13 @@ class DailyNewsPlugin(Star):
         hour, minute = map(int, self.push_time.split(":"))
         datetime.time(hour, minute)
         self.show_text_news = config.get("show_text_news", False)
-        self.use_local_image_draw = config.get("use_local_image_draw", True)
+        self.default_news_mode = config.get("default_news_mode", "image")
+        if self.default_news_mode not in ("image", "text", "all"):
+            self.default_news_mode = "image"
+        self.render_timeout = max(10, min(120, int(config.get("image_render_timeout", 60))))
+        self._render_lock = asyncio.Lock()
+        self._last_image_status = "尚未生成"
+        self._last_send_status = "尚未发送"
         self.sources = selected_sources(config.get("news_sources", {}))
         self.include_links = config.get("include_source_links", True)
         self.client = NewsClient(config.get("items_per_source", 5), config.get("cache_seconds", 600))
@@ -37,34 +40,30 @@ class DailyNewsPlugin(Star):
     async def fetch_news_data(self):
         return await self.client.get("60s")
 
-    async def download_image(self, news_data):
-        if not news_data.get("image"):
-            raise ValueError("上游没有提供图片")
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-            async with session.get(news_data["image"]) as response:
-                response.raise_for_status()
-                chunks, size = [], 0
-                async for chunk in response.content.iter_chunked(65536):
-                    size += len(chunk)
-                    if size > 8 * 1024 * 1024:
-                        raise ValueError("上游图片过大")
-                    chunks.append(chunk)
-                if not size:
-                    raise ValueError("上游图片为空")
-                return base64.b64encode(b"".join(chunks)).decode("ascii")
-
     def generate_news_text(self, news_data):
         return "\n\n".join(text_pages(news_data, self.include_links))
 
-    async def _image(self, data):
-        if data["source_id"] != "60s":
-            return await asyncio.to_thread(create_source_image, data)
-        if not self.use_local_image_draw:
+    async def _render_image(self, text):
+        # AstrBot owns the renderer, fonts and backend configuration. The
+        # reference plugin uses this same Star API, not custom Pillow drawing.
+        async with self._render_lock:
             try:
-                return await self.download_image(data)
+                result = await asyncio.wait_for(
+                    self.text_to_image(text, return_url=True),
+                    timeout=self.render_timeout,
+                )
+                kind, location = image_location(result)
+                component = Image.fromURL(location) if kind == "url" else Image.fromFileSystem(location)
+            except asyncio.TimeoutError:
+                logger.warning(f"[每日新闻] AstrBot 文转图超过 {self.render_timeout} 秒")
+                self._last_image_status = "失败：AstrBot 文转图超时"
+                raise RuntimeError("AstrBot 文转图超时") from None
             except Exception:
-                logger.warning("[每日新闻] 原图不可用，尝试本地绘制")
-        return await asyncio.to_thread(create_news_image_from_data, data, logger)
+                self._last_image_status = "失败：请检查 AstrBot 文转图配置及插件日志"
+                logger.error("[每日新闻] AstrBot text_to_image 调用失败", exc_info=True)
+                raise RuntimeError("AstrBot 文转图服务不可用或返回无效图片") from None
+            self._last_image_status = "成功（不代表平台已接收图片）"
+            return component
 
     @staticmethod
     def _chain(component):
@@ -73,11 +72,7 @@ class DailyNewsPlugin(Star):
         return result
 
     async def _digest_image(self, columns, failed):
-        # Preserve the original single-source 60s poster option. A multi-source
-        # request always renders one locally composed image, including failures.
-        if len(columns) == 1 and not failed and columns[0]["source_id"] == "60s":
-            return await self._image(columns[0])
-        return await asyncio.to_thread(create_digest_image, columns, failed)
+        return await self._render_image(digest_image_text(columns, failed))
 
     async def _prepare(self, sources, mode):
         if mode not in ("image", "text", "all"):
@@ -100,7 +95,7 @@ class DailyNewsPlugin(Star):
                 image = await self._digest_image(columns, failed)
                 if not image:
                     raise ValueError("没有生成汇总图片")
-                components.append(Image.fromBase64(image))
+                components.append(image)
                 image_ok = True
             except Exception:
                 image_failed = True
@@ -108,7 +103,7 @@ class DailyNewsPlugin(Star):
         if mode != "image" or not image_ok:
             text = digest_text(columns, failed, self.include_links, max_chars=3400)
             if image_failed:
-                text = "汇总图片生成失败，已改为文字。\n" + text
+                text = "图片渲染失败，已改为文字。请管理员运行 /news_image_test，并检查 AstrBot 文转图设置和插件日志。\n" + text
             components.append(Plain(text))
         message = MessageChain()
         message.chain = components
@@ -126,9 +121,11 @@ class DailyNewsPlugin(Star):
                     if index + 1 < len(messages):
                         await asyncio.sleep(self._message_interval)
                 delivered += 1
+                self._last_send_status = "平台发送调用成功"
             except Exception:
                 failed += 1
-                logger.warning(f"[每日新闻] 发送到 {target} 失败，可能部分消息已送达")
+                self._last_send_status = "平台发送失败（可能部分消息已送达）"
+                logger.error(f"[每日新闻] 发送到 {target} 失败，可能部分消息已送达", exc_info=True)
         return delivered, failed
 
     async def send_daily_news(self, mode=None, sources=None):
@@ -182,11 +179,14 @@ class DailyNewsPlugin(Star):
     async def check_status(self, event: AstrMessageEvent):
         seconds = self.calculate_sleep_time()
         yield event.plain_result(
-            "每日新闻插件 v2.2.2\n"
+            "每日新闻插件 v2.2.3\n"
             f"目标：{', '.join(map(str, self.target_groups))}\n"
             f"推送时间：{self.push_time}（服务器时区）\n"
             f"启用栏目：{'、'.join(SOURCES[key][0] for key in self.sources) or '无'}\n"
             f"每个新增栏目最多 {self.client.limit} 条；缓存 {self.client.ttl} 秒\n"
+            f"默认查询模式：{self.default_news_mode}；转图：AstrBot text_to_image\n"
+            f"最近图片生成：{self._last_image_status}\n"
+            f"最近消息发送：{self._last_send_status}\n"
             f"距离下次推送：{int(seconds // 3600)} 小时 {int(seconds % 3600 // 60)} 分钟"
         )
 
@@ -194,15 +194,29 @@ class DailyNewsPlugin(Star):
         messages, unavailable, count = await self._prepare(sources, mode)
         sent, errors = await self._dispatch([event.unified_msg_origin], messages)
         if errors or not sent:
-            raise ValueError("发送失败，可能部分消息已送达")
+            raise ValueError("消息发送失败；若图片已生成，请检查平台图片上传及插件日志，可能部分消息已送达")
 
     @filter.command("news")
-    async def news(self, event: AstrMessageEvent, source: str = "all", mode: str = "text"):
+    async def news(self, event: AstrMessageEvent, source: str = "all", mode: str = ""):
         """例如 /news 微博、/news ai image、/news all。"""
         try:
-            await self._send_current(event, self._sources_for(source, self.sources), mode)
+            await self._send_current(event, self._sources_for(source, self.sources), mode or self.default_news_mode)
         except Exception as exc:
             yield event.plain_result(f"获取新闻失败：{exc}")
+        finally:
+            event.stop_event()
+
+    @filter.command("news_image_test")
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    async def image_test(self, event: AstrMessageEvent):
+        """不抓取新闻，独立检查 AstrBot 转图及当前平台图片发送。"""
+        try:
+            image = await self._render_image("# 新闻图片渲染测试\n\n这是一张通过 AstrBot text_to_image 生成的测试图片。")
+            sent, errors = await self._dispatch([event.unified_msg_origin], [self._chain(image)])
+            if errors or not sent:
+                yield event.plain_result("图片已生成，但平台发送失败。请检查平台图片上传和插件日志。")
+        except Exception as exc:
+            yield event.plain_result(f"图片渲染失败：{exc}。请检查 AstrBot 文转图配置；尚未尝试发送图片。")
         finally:
             event.stop_event()
 
