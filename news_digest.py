@@ -1,4 +1,5 @@
 """One digest, one image / message. No new fetches or platform sends here."""
+import datetime
 import html
 
 
@@ -68,22 +69,46 @@ def markdown_literal(value):
     return html.escape(text, quote=False)
 
 
-def digest_image_text(columns, unavailable=()):
-    """Readable whole-document input for AstrBot text_to_image, not a bitmap."""
+def digest_markdown(columns, unavailable=(), include_links=False, ai_unavailable=False, max_chars=60000):
+    """Markdown edition of the raw digest: real # / ## headings, never 【】.
+
+    Used for image rendering and as the translation source, so a failed or
+    disabled AI summary still yields a structured document whose headings
+    survive translation instead of collapsing into bracket-only lines.
+    """
     if not columns:
         raise ValueError("没有可绘制的栏目")
-    parts = ["# AI新闻简报" if any(c.get("ai_summary") for c in columns) else "# 新闻与热榜汇总", f"共 {len(columns)} 个栏目 · 各栏目数据日期独立标注"]
+    date = datetime.datetime.now().astimezone().strftime("%Y-%m-%d")
+    title = "# AI新闻简报" if any(c.get("ai_summary") for c in columns) else "# 新闻与热榜汇总"
+    parts = [title + " · " + date, f"共 {len(columns)} 个栏目 · 各栏目数据日期独立标注"]
+    if ai_unavailable:
+        parts.append("AI总结本次不可用，以下为原始素材汇总（/news_raw 查看纯文字原始素材）。")
     for data in columns:
-        parts.append("## " + markdown_literal(data["source_name"]))
+        parts.append("## " + markdown_literal(data["source_name"]) + " · " + markdown_literal(data["category"]))
         stamp = "数据日期：" + data["source_date"] if data["source_date"] else "获取时间：" + data["fetched_at"]
-        parts.append(markdown_literal(stamp) + " · " + markdown_literal(data["category"]) + " · " + markdown_literal(data["provider"]))
+        parts.append(markdown_literal(stamp + " · 来源：" + data["provider"]))
         for index, item in enumerate(data["items"], 1):
-            parts.append(f"{index}. " + markdown_literal(clipped(item["title"], 180)))
+            row = f"{index}. " + markdown_literal(clipped(item["title"], 180))
+            url = item.get("url", "")
+            if include_links and url:
+                # Raw URL on its own line: escaped text would break the link and
+                # inflate the translation prompt.
+                row += "\n   " + url
+            parts.append(row)
         if data.get("tip"):
             parts.append("提示：" + markdown_literal(clipped(data["tip"], 160)))
     if unavailable:
         parts += ["## 暂不可用", markdown_literal("、".join(unavailable))]
-    parts += ["---", "来源：各栏目所示平台或聚合服务。", "热榜仅反映讨论热度，不代表内容已经核实。较长标题已省略；原文链接可使用文字模式查询。"]
+    parts += ["---", "来源：各栏目所示平台或聚合服务。",
+              "热榜仅反映讨论热度，不代表内容已经核实。较长标题已省略；原文链接可使用文字模式查询。"]
     if any(c.get("ai_summary") for c in columns):
         parts.append("AI基于标题/已有摘要整理，未核实全文；原始素材请用 /news_raw 查询。")
-    return "\n\n".join(parts)
+    text = "\n\n".join(parts)
+    if len(text) > max_chars:
+        raise ValueError("Markdown汇总超过长度预算")
+    return text
+
+
+def digest_image_text(columns, unavailable=()):
+    """Readable whole-document input for AstrBot text_to_image, not a bitmap."""
+    return digest_markdown(columns, unavailable)

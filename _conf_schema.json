@@ -129,8 +129,8 @@
   "image_render_timeout": {
     "description": "AstrBot 文转图超时（秒）",
     "type": "int",
-    "default": 60,
-    "hint": "范围10–120。使用 AstrBot 文转图服务，不再用插件内置 Pillow 绘图；失败时明确提示并降级文字。"
+    "default": 90,
+    "hint": "范围10–300。自建文转图服务通常几秒；公共端点排队可能超过90秒，建议自建或改用本地渲染。失败时该语言降级文字。"
   },
   "ai_summary_enabled": {
     "description": "使用 AI 总结简报",
@@ -147,8 +147,8 @@
   "ai_summary_timeout": {
     "description": "AI总结超时（秒）",
     "type": "int",
-    "default": 60,
-    "hint": "10–180秒；相同素材/会话摘要缓存10分钟。"
+    "default": 120,
+    "hint": "10–300秒。模型慢或素材多时请调大（例如180）；超时会回退原始汇总。相同素材/会话摘要缓存10分钟。"
   },
   "ai_summary_prompt": {
     "description": "AI摘要编辑偏好",
@@ -236,5 +236,29 @@
       "en"
     ],
     "hint": "支持 zh-CN简中、zh-TW繁中、en英文、ja日文、ko韩文、fr法文、de德文、es西文、ru俄文、ar阿文；去重后按列表顺序发送。仅中文可关闭多语言或只保留zh-CN。"
+  },
+  "ai_summary_max_items": {
+    "type": "int",
+    "description": "每个栏目送入模型的条目数",
+    "default": 20,
+    "hint": "3–30条。素材越少提示词越短、模型越快；抓取条数另由 items_per_source 控制。"
+  },
+  "translate_timeout": {
+    "type": "int",
+    "description": "单种语言翻译超时（秒）",
+    "default": 120,
+    "hint": "10–300秒。整篇简报翻译比总结更长，建议不小于 ai_summary_timeout。超时只影响该语言版本。"
+  },
+  "translate_concurrency": {
+    "type": "int",
+    "description": "翻译并发数",
+    "default": 2,
+    "hint": "1–4。多语言同时翻译可显著缩短总耗时，但会同时发起多个模型请求；模型限流时请调小。"
+  },
+  "language_label_style": {
+    "type": "str",
+    "description": "语言标识方式",
+    "default": "title",
+    "hint": "title=各语言用本地化大标题（推荐）；bracket=额外加【语言】前缀行；none=不加标识。"
   }
 }

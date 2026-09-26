@@ -309,7 +309,7 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         self.plugin.languages=['zh-CN','en']
         self.plugin.client.bundle=AsyncMock(return_value=[('it',source_module.normalize('it',{'data':[{'title':'新闻'}]}))])
         self.plugin.ai.summarize=AsyncMock(return_value=('## 科技\n中文简报',''))
-        self.plugin.ai.translate=AsyncMock(return_value='## Technology\nEnglish digest')
+        self.plugin.ai.translate_edition=AsyncMock(return_value='# Daily Digest · 2026-09-26\n\n## Technology\nEnglish digest')
         self.plugin.text_to_image=AsyncMock(side_effect=['https://images.example.com/zh.png','https://images.example.com/en.png'])
         messages,_,_=await self.plugin._prepare(['it'],'image')
         self.assertEqual(len(messages),2)
@@ -317,17 +317,17 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(messages[1].chain,[('image-url','https://images.example.com/en.png')])
         self.plugin.client.bundle.assert_awaited_once()
         self.plugin.ai.summarize.assert_awaited_once()
-        self.plugin.ai.translate.assert_awaited_once()
+        self.plugin.ai.translate_edition.assert_awaited_once()
         await self.plugin._dispatch(['group1'],messages)
         self.assertEqual(len(self.sent),2)
 
     async def test_two_text_editions_and_long_translation_pages(self):
         self.plugin.languages=['zh-CN','en']
         self.plugin.ai.summarize=AsyncMock(return_value=('中文正文',''))
-        self.plugin.ai.translate=AsyncMock(return_value=('English news line.\n'*300))
+        self.plugin.ai.translate_edition=AsyncMock(return_value='# Daily Digest\n\n'+'English news line.\n'*300)
         messages,_,_=await self.plugin._prepare(['it'],'text')
-        self.assertIn('简体中文',messages[0].chain[0].text)
-        self.assertIn('English',messages[1].chain[0].text)
+        self.assertIn('中文正文',messages[0].chain[0].text)
+        self.assertIn('Daily Digest',messages[1].chain[0].text)
         self.assertGreater(len(messages),2)
         self.assertTrue(all(len(m.chain[0].text)<=3200 for m in messages))
         self.plugin._digest_image.assert_not_awaited()
@@ -335,10 +335,10 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
     async def test_failed_translation_does_not_block_next_language(self):
         self.plugin.languages=['zh-CN','en','ja']
         self.plugin.ai.summarize=AsyncMock(return_value=('中文正文',''))
-        self.plugin.ai.translate=AsyncMock(side_effect=[ValueError('private-token'),'日本語ニュース'])
+        self.plugin.ai.translate_edition=AsyncMock(side_effect=[ValueError('private-token'),'# デイリーダイジェスト · 2026-09-26\n\n## 科技\n日本語ニュース'])
         messages,_,_=await self.plugin._prepare(['it'],'text')
         self.assertEqual(len(messages),3)
-        self.assertIn('翻译失败',messages[1].chain[0].text)
+        self.assertIn('生成失败',messages[1].chain[0].text)
         self.assertNotIn('private-token',messages[1].chain[0].text)
         self.assertIn('日本語ニュース',messages[2].chain[0].text)
 
@@ -351,7 +351,51 @@ class PluginTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_raw_bypasses_multilingual_translation(self):
         self.plugin.languages=['zh-CN','en']
-        self.plugin.ai.translate=AsyncMock(side_effect=AssertionError('must not translate'))
+        self.plugin.ai.translate_edition=AsyncMock(side_effect=AssertionError('must not translate'))
         messages,_,_=await self.plugin._prepare(['it'],'text',use_ai=False)
         self.assertEqual(len(messages),1)
-        self.plugin.ai.translate.assert_not_awaited()
+        self.plugin.ai.translate_edition.assert_not_awaited()
+
+    async def test_ai_failure_image_keeps_markdown_headings_not_brackets(self):
+        # Regression: a timed-out AI summary used to fall back to the 【】-style
+        # plain digest, so images (and their translations) lost every heading.
+        del self.plugin._digest_image
+        self.plugin.ai.summarize=AsyncMock(return_value=(None,'AI总结暂不可用，以下为原始素材汇总。'))
+        self.plugin.text_to_image=AsyncMock(return_value='https://images.example.com/fallback.png')
+        messages,_,count=await self.plugin._prepare(['it','zhihu'],'image')
+        rendered=self.plugin.text_to_image.call_args.args[0]
+        self.assertEqual(count,2)
+        self.assertEqual(messages[0].chain,[('image-url','https://images.example.com/fallback.png')])
+        self.assertIn('# 新闻与热榜汇总',rendered)
+        self.assertGreaterEqual(rendered.count('\n## '),2)
+        self.assertIn('AI总结本次不可用',rendered)
+        self.assertNotIn('【IT之家资讯',rendered)
+        self.assertNotIn('【新闻与热榜汇总】',rendered)
+
+    async def test_ai_failure_translation_base_is_the_same_markdown_document(self):
+        self.plugin.languages=['zh-CN','en']
+        self.plugin.ai.summarize=AsyncMock(return_value=(None,'AI总结暂不可用。'))
+        captured={}
+        async def edition(text,language,umo=None):
+            captured['base']=text
+            return '# Daily Digest\n\n## Technology\nEnglish'
+        self.plugin.ai.translate_edition=edition
+        self.plugin.text_to_image=AsyncMock(return_value='https://images.example.com/x.png')
+        messages,_,_=await self.plugin._prepare(['it','zhihu'],'image')
+        self.assertEqual(len(messages),2)
+        self.assertIn('# 新闻与热榜汇总',captured['base'])
+        self.assertIn('## ',captured['base'])
+        self.assertNotIn('【',captured['base'].split('---')[0].replace('【】',''))
+
+    async def test_label_styles(self):
+        self.plugin.languages=['zh-CN','en']
+        self.plugin.ai.summarize=AsyncMock(return_value=('# 每日简报 · 2026-09-26\n\n中文正文',''))
+        self.plugin.ai.translate_edition=AsyncMock(return_value='# Daily Digest · 2026-09-26\n\nEnglish body')
+        for style,expected in (('title',False),('bracket',True),('none',False)):
+            self.plugin.label_style=style
+            messages,_,_=await self.plugin._prepare(['it'],'text')
+            has_label='【简体中文】' in messages[0].chain[0].text or '【English】' in messages[1].chain[0].text
+            self.assertEqual(has_label,expected,style)
+        self.plugin.label_style='title'
+        messages,_,_=await self.plugin._prepare(['it'],'text')
+        self.assertIn('# Daily Digest',messages[1].chain[0].text)

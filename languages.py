@@ -4,6 +4,13 @@ LANGUAGES = {
     'ko': '한국어', 'fr': 'Français', 'de': 'Deutsch', 'es': 'Español',
     'ru': 'Русский', 'ar': 'العربية',
 }
+# Program-generated edition titles: the model never translates the title, so a
+# title can neither be dropped nor turned into a bracket-only line.
+TITLE_I18N = {
+    'zh-CN': '每日简报', 'zh-TW': '每日簡報', 'en': 'Daily Digest', 'ja': 'デイリーダイジェスト',
+    'ko': '데일리 다이제스트', 'fr': 'Synthèse quotidienne', 'de': 'Tägliche Übersicht',
+    'es': 'Resumen diario', 'ru': 'Ежедневный дайджест', 'ar': 'الملخص اليومي',
+}
 ALIASES = {'zh':'zh-CN','zh-cn':'zh-CN','zh-hans':'zh-CN','中文':'zh-CN','简体中文':'zh-CN',
            'zh-tw':'zh-TW','zh-hant':'zh-TW','繁体中文':'zh-TW','繁體中文':'zh-TW',
            '英文':'en','英语':'en','日文':'ja','日语':'ja','韩文':'ko','韩语':'ko',

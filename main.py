@@ -9,14 +9,14 @@ from astrbot.api import logger
 from astrbot.core.message.message_event_result import MessageChain
 from astrbot.api.message_components import Plain, Image
 from .news_sources import NewsClient, SOURCES, selected_sources, resolve_source, text_pages
-from .news_digest import digest_text, digest_image_text
+from .news_digest import digest_text, digest_markdown
 from .image_output import image_location
 from .ai_digest import AISummarizer
 from .weather import WeatherClient
 from .languages import LANGUAGES, language_list
 
 
-@register("astrbot_plugin_daily_news", "anka, shizegame", "内置多来源新闻、科技资讯与热榜推送", "2.4.0")
+@register("astrbot_plugin_daily_news", "anka, shizegame", "内置多来源新闻、科技资讯与热榜推送", "2.4.1")
 class DailyNewsPlugin(Star):
     def __init__(self, context: Context, config: dict):
         super().__init__(context)
@@ -24,6 +24,11 @@ class DailyNewsPlugin(Star):
         self.ai = AISummarizer(context, config)
         self.weather = WeatherClient(config)
         self.languages = language_list(config)
+        # 'title' puts the language into a program-generated localized heading,
+        # 'bracket' keeps the old 【语言】 prefix line, 'none' adds no label.
+        self.label_style = str(config.get("language_label_style", "title") or "title").strip()
+        if self.label_style not in ("title", "bracket", "none"):
+            self.label_style = "title"
         self._last_language_status = "尚未生成"
         self.target_groups = config.get("target_groups", [])
         self.push_time = config.get("push_time", "08:00")
@@ -34,7 +39,7 @@ class DailyNewsPlugin(Star):
         self.default_news_mode = config.get("default_news_mode", "image")
         if self.default_news_mode not in ("image", "text", "all"):
             self.default_news_mode = "image"
-        self.render_timeout = max(10, min(120, int(config.get("image_render_timeout", 60))))
+        self.render_timeout = max(10, min(300, int(config.get("image_render_timeout", 90))))
         self._render_lock = asyncio.Lock()
         self._last_image_status = "尚未生成"
         self._last_send_status = "尚未发送"
@@ -80,7 +85,9 @@ class DailyNewsPlugin(Star):
         return result
 
     async def _digest_image(self, columns, failed):
-        return await self._render_image(digest_image_text(columns, failed))
+        # Same Markdown document the translated editions are built from, so a
+        # failed AI summary no longer renders as a wall of 【】 without headings.
+        return await self._render_image(digest_markdown(columns, failed, ai_unavailable=True))
 
     async def _prepare(self, sources, mode, umo=None, use_ai=True):
         if mode not in ("image", "text", "all"):
@@ -114,25 +121,38 @@ class DailyNewsPlugin(Star):
         if not columns:
             # Don't spend model calls translating an empty failure report.
             return [self._chain(Plain(digest_text(columns, failed, self.include_links)))], failed, 0
-        base_text = ai_text or digest_text(columns, failed, self.include_links, max_chars=3400)
+        # Markdown document for images and translation. The 【】-style plain text
+        # stays for Chinese chat messages, where Markdown is not rendered anyway.
+        base_markdown = ai_text or digest_markdown(columns, failed, ai_unavailable=True)
+        base_plain = ai_text or digest_text(columns, failed, self.include_links, max_chars=3400)
+        others = [x for x in languages if x != 'zh-CN']
+        # Concurrent (bounded inside AISummarizer) but reassembled in configured order.
+        editions = dict(zip(others, await asyncio.gather(
+            *[self.ai.translate_edition(base_markdown, language, umo) for language in others],
+            return_exceptions=True)))
         messages, language_errors = [], []
         for language in languages:
-            try:
-                text = base_text if language == 'zh-CN' else await self.ai.translate(base_text, language, umo)
-            except Exception as exc:
-                language_errors.append(LANGUAGES[language])
-                logger.warning(f"[每日新闻] {language} 翻译失败：{type(exc).__name__}")
-                messages.append(self._chain(Plain(f"{LANGUAGES[language]} 版本翻译失败，已跳过该版本；其他语言继续发送。请检查模型配置和日志。")))
-                continue
-            # Separate editions, not all languages concatenated onto one image.
-            display_text = (f"【{LANGUAGES[language]}】\n\n" if len(languages) > 1 else '') + text
+            if language == 'zh-CN':
+                markdown_text, plain_text = base_markdown, base_plain
+            else:
+                edition = editions[language]
+                if isinstance(edition, BaseException):
+                    language_errors.append(LANGUAGES[language])
+                    logger.warning(f"[每日新闻] {language} 翻译失败：{type(edition).__name__}")
+                    messages.append(self._chain(Plain(
+                        f"{LANGUAGES[language]} 版本生成失败（{type(edition).__name__}），已跳过该版本；"
+                        "其他语言继续发送。请检查模型、ai_summary_timeout/translate_timeout 与日志。")))
+                    continue
+                markdown_text = plain_text = edition
+            label = (f"【{LANGUAGES[language]}】\n\n"
+                     if self.label_style == 'bracket' and len(languages) > 1 else '')
             components, image_ok = [], False
             if mode != 'text':
                 try:
-                    if language == 'zh-CN' and not ai_text:
+                    if language == 'zh-CN' and not ai_text and not label:
                         image = await self._digest_image(columns, failed)
                     else:
-                        image = await self._render_image(display_text)
+                        image = await self._render_image(label + markdown_text)
                     if not image:
                         raise ValueError('没有生成图片')
                     components.append(image)
@@ -141,7 +161,7 @@ class DailyNewsPlugin(Star):
                     logger.warning(f"[每日新闻] {language} 图片失败，该语言回退文字")
             if mode != 'image' or not image_ok:
                 notice = '' if mode == 'text' or image_ok else '图片渲染失败，已改为文字。请管理员运行 /news_image_test。\n'
-                pages = self._text_chunks(display_text)
+                pages = self._text_chunks(label + (plain_text if language == 'zh-CN' else markdown_text))
                 components.append(Plain(notice + pages[0]))
                 first = self._chain(components[0])
                 first.chain = components
@@ -151,7 +171,7 @@ class DailyNewsPlugin(Star):
                 messages.append(self._chain(components[0]))
         self._last_language_status = '完成：' + '、'.join(LANGUAGES[x] for x in languages if LANGUAGES[x] not in language_errors)
         if language_errors:
-            self._last_language_status += '；翻译失败：' + '、'.join(language_errors)
+            self._last_language_status += '；失败：' + '、'.join(language_errors)
         return messages, failed, len(columns)
 
     @staticmethod
@@ -245,7 +265,7 @@ class DailyNewsPlugin(Star):
             f"推送时间：{self.push_time}（服务器时区）\n"
             f"启用栏目：{'、'.join(SOURCES[key][0] for key in self.sources) or '无'}\n"
             f"每个新增栏目最多 {self.client.limit} 条；缓存 {self.client.ttl} 秒\n"
-            f"推送语言：{'、'.join(LANGUAGES[x] for x in self.languages)}\n"
+            f"推送语言：{'、'.join(LANGUAGES[x] for x in self.languages)}（标题标签：{self.label_style}，翻译并发：{self.ai.concurrency}）\n"
             f"最近多语言：{self._last_language_status}\n"
             f"天气：{self.weather.status}；配置城市：{'、'.join(self.weather.cities) or '未设置'}\n"
             f"AI总结：{self.ai.status}；模型：{self.ai.provider_id or 'AstrBot 当前/默认模型'}\n"
